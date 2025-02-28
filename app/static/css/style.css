@@ -1,0 +1,99 @@
+/* app/static/css/style.css */
+
+/* Animation styles */
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes slideIn {
+    from { transform: translateY(20px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+}
+
+/* General styles */
+body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+}
+
+/* Section animations */
+#upload-section,
+#interview-section,
+#feedback-section,
+#example-section,
+#summary-section {
+    animation: fadeIn 0.5s ease-out;
+}
+
+/* Question container */
+#question-container {
+    border-left: 4px solid #4f46e5;
+    transition: all 0.3s ease;
+}
+
+#question-container:hover {
+    box-shadow: 0 4px 12px rgba(79, 70, 229, 0.1);
+}
+
+/* Custom styling for textareas */
+textarea {
+    resize: vertical;
+    min-height: 120px;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+textarea:focus {
+    border-color: #4f46e5;
+    box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.2);
+}
+
+/* Button hover effects */
+button {
+    transition: all 0.2s ease;
+}
+
+button:hover {
+    transform: translateY(-1px);
+}
+
+button:active {
+    transform: translateY(1px);
+}
+
+/* Score bar animation */
+#score-bar, #average-score-bar {
+    transition: width 1s ease-out;
+}
+
+/* Feedback cards styling */
+.p-4 {
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.p-4:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.05);
+}
+
+/* Loading spinner animation */
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.animate-spin {
+    animation: spin 1s linear infinite;
+}
+
+/* Responsive adjustments */
+@media (max-width: 640px) {
+    .container {
+        padding-left: 1rem;
+        padding-right: 1rem;
+    }
+    
+    .grid-cols-2 {
+        grid-template-columns: 1fr;
+    }
+}

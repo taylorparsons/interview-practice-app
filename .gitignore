@@ -1,0 +1,35 @@
+# Virtual Environment
+venv/
+*.env
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE files
+.vscode/
+.idea/
+
+# Dependency directories
+node_modules/
+
+# Logs
+*.log
+
+# macOS system files
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Backup files
+*.bak
+
+# Compiled files
+*.pyc
+*.pyo
+*.pyd
+
+# OpenAI and sensitive config
+.openai_config
+config.py

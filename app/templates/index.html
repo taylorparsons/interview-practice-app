@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interview Practice App</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <header class="mb-10 text-center">
+            <h1 class="text-3xl font-bold text-indigo-700">Interview Practice App</h1>
+            <p class="text-gray-600">Upload your resume and a job description to practice interviewing</p>
+        </header>
+
+        <main>
+            <!-- Document Upload Section -->
+            <section id="upload-section" class="bg-white p-6 rounded-lg shadow-md mb-8">
+                <h2 class="text-xl font-semibold mb-4">Upload Documents</h2>
+                <form id="upload-form" class="space-y-4">
+                    <div>
+                        <label for="resume" class="block text-sm font-medium text-gray-700">Your Resume</label>
+                        <input type="file" id="resume" name="resume" accept=".pdf,.docx,.txt" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                        <p class="mt-1 text-sm text-gray-500">Upload your resume (PDF, DOCX, or TXT)</p>
+                    </div>
+                    
+                    <div>
+                        <label for="job-description" class="block text-sm font-medium text-gray-700">Job Description</label>
+                        <input type="file" id="job-description" name="job_description" accept=".pdf,.docx,.txt" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                        <p class="mt-1 text-sm text-gray-500">Upload the job description (PDF, DOCX, or TXT)</p>
+                    </div>
+                    
+                    <div>
+                        <button type="submit" class="w-full inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                            Start Interview Practice
+                        </button>
+                    </div>
+                </form>
+            </section>
+            
+            <!-- Loading Section -->
+            <section id="loading-section" class="hidden bg-white p-6 rounded-lg shadow-md mb-8 text-center">
+                <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-700 mx-auto mb-4"></div>
+                <p class="text-gray-700">Preparing your interview questions...</p>
+            </section>
+            
+            <!-- Interview Section -->
+            <section id="interview-section" class="hidden">
+                <div class="bg-white p-6 rounded-lg shadow-md mb-8">
+                    <h2 class="text-xl font-semibold mb-4">Interview Practice</h2>
+                    
+                    <div id="interview-container" class="space-y-6">
+                        <div id="question-container" class="p-4 bg-indigo-50 rounded-lg">
+                            <h3 class="font-medium text-indigo-700 mb-2">Question</h3>
+                            <p id="current-question" class="text-gray-800"></p>
+                        </div>
+                        
+                        <div>
+                            <label for="answer" class="block text-sm font-medium text-gray-700">Your Answer</label>
+                            <textarea id="answer" rows="5" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"></textarea>
+                        </div>
+                        
+                        <div class="flex space-x-3">
+                            <button id="submit-answer" class="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                                Submit Answer
+                            </button>
+                            <button id="get-example" class="inline-flex justify-center py-2 px-4 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                                See Example Answer
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Feedback Section -->
+                <div id="feedback-section" class="hidden bg-white p-6 rounded-lg shadow-md mb-8">
+                    <h3 class="text-lg font-semibold mb-4">Feedback</h3>
+                    
+                    <div class="mb-4">
+                        <div class="flex items-center justify-between">
+                            <span class="text-sm font-medium text-gray-700">Overall Score</span>
+                            <span id="score-value" class="text-indigo-700 font-semibold"></span>
+                        </div>
+                        <div class="w-full bg-gray-200 rounded-full h-2.5 mt-2">
+                            <div id="score-bar" class="bg-indigo-600 h-2.5 rounded-full" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                        <div class="p-4 bg-green-50 rounded-lg">
+                            <h4 class="font-medium text-green-700 mb-2">Strengths</h4>
+                            <p id="strengths-feedback" class="text-gray-800 text-sm"></p>
+                        </div>
+                        
+                        <div class="p-4 bg-amber-50 rounded-lg">
+                            <h4 class="font-medium text-amber-700 mb-2">Areas for Improvement</h4>
+                            <p id="improvements-feedback" class="text-gray-800 text-sm"></p>
+                        </div>
+                    </div>
+                    
+                    <div class="grid grid-cols-1 gap-4">
+                        <div class="p-4 bg-blue-50 rounded-lg">
+                            <h4 class="font-medium text-blue-700 mb-2">Content Feedback</h4>
+                            <p id="content-feedback" class="text-gray-800 text-sm"></p>
+                        </div>
+                        
+                        <div class="p-4 bg-purple-50 rounded-lg">
+                            <h4 class="font-medium text-purple-700 mb-2">Tone Feedback</h4>
+                            <p id="tone-feedback" class="text-gray-800 text-sm"></p>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-6">
+                        <button id="next-question" class="w-full inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                            Next Question
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Example Answer Section -->
+                <section id="example-section" class="hidden bg-white p-6 rounded-lg shadow-md mb-8">
+                    <h2 class="text-xl font-semibold mb-4">Example Answer</h2>
+                    <div id="example-answer" class="prose prose-indigo max-w-none"></div>
+                </section>
+                
+                <!-- Summary Section -->
+                <div id="summary-section" class="hidden bg-white p-6 rounded-lg shadow-md">
+                    <h3 class="text-lg font-semibold mb-4">Interview Summary</h3>
+                    
+                    <div class="mb-4">
+                        <div class="flex items-center justify-between">
+                            <span class="text-sm font-medium text-gray-700">Average Score</span>
+                            <span id="average-score" class="text-indigo-700 font-semibold"></span>
+                        </div>
+                        <div class="w-full bg-gray-200 rounded-full h-2.5 mt-2">
+                            <div id="average-score-bar" class="bg-indigo-600 h-2.5 rounded-full" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    
+                    <div class="grid grid-cols-1 gap-4 mb-6">
+                        <div class="p-4 bg-green-50 rounded-lg">
+                            <h4 class="font-medium text-green-700 mb-2">Overall Strengths</h4>
+                            <ul id="overall-strengths" class="list-disc list-inside text-gray-800 text-sm"></ul>
+                        </div>
+                        
+                        <div class="p-4 bg-amber-50 rounded-lg">
+                            <h4 class="font-medium text-amber-700 mb-2">Overall Areas for Improvement</h4>
+                            <ul id="overall-improvements" class="list-disc list-inside text-gray-800 text-sm"></ul>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-6">
+                        <button id="restart-interview" class="w-full inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                            Practice Again
+                        </button>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/livekit-client/dist/livekit-client.umd.js"></script>
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
