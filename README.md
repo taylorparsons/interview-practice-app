@@ -77,14 +77,11 @@ pip install -r requirements.txt
 ```
 
 4. Set Up Environment Variables
-Create a `.env` file with your OpenAI API key and optional realtime voice configuration:
+Copy `.env.example` to `.env`, then add your OpenAI API key:
+```bash
+cp .env.example .env
 ```
-OPENAI_API_KEY=your_api_key_here
-# Optional realtime overrides
-OPENAI_REALTIME_MODEL=gpt-realtime-mini-2025-10-06
-OPENAI_REALTIME_VOICE=verse
-OPENAI_REALTIME_URL=https://api.openai.com/v1/realtime
-```
+Update `.env` with your token (and override realtime model/voice if desired).
 
 5. Run the Application
 ```bash
