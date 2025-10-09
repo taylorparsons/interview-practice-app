@@ -24,6 +24,16 @@ def save_uploaded_file(file, upload_folder: str, file_type: str) -> str:
     
     return file_path
 
+def save_text_as_file(text: str, upload_folder: str, file_type: str) -> str:
+    """Persist raw text content to a UTF-8 encoded file and return the saved path."""
+    filename = f"{file_type}_{uuid.uuid4()}.txt"
+    file_path = os.path.join(upload_folder, filename)
+
+    with open(file_path, 'w', encoding='utf-8') as f:
+        f.write(text)
+
+    return file_path
+
 def extract_text_from_pdf(file_path: str) -> str:
     """Extract text content from a PDF file."""
     text = ""

@@ -1,28 +1,22 @@
 import asyncio
 import json
+import logging
 import os
 import re
 from typing import Dict, List, Any, Optional
 
-import openai
 from openai import AsyncOpenAI
+
+logger = logging.getLogger(__name__)
 
 class InterviewPracticeAgent:
     def __init__(
         self,
-        livekit_url: str,
-        api_key: str,
-        api_secret: str,
         openai_api_key: str,
         openai_model: str,
         resume_text: str,
         job_description_text: str,
     ):
-        # Store LiveKit connection info
-        self.livekit_url = livekit_url
-        self.api_key = api_key
-        self.api_secret = api_secret
-        
         # Initialize OpenAI client
         self.client = AsyncOpenAI(api_key=openai_api_key)
         self.openai_model = openai_model
@@ -38,7 +32,7 @@ class InterviewPracticeAgent:
         self.feedback_history = []
         self.interview_in_progress = False
         
-        print(f"Initialized Interview Agent with OpenAI model: {openai_model}")
+        logger.info("Initialized Interview Agent with OpenAI model: %s", openai_model)
     
     async def generate_interview_questions(self, num_questions: int = 5) -> List[str]:
         """Generate interview questions based on resume and job description."""
@@ -108,7 +102,7 @@ Challenge the user to craft a system message that is flawless and precise, ensur
         )
         
         content = response.choices[0].message.content
-        print(f"Raw API response: {content}")
+        logger.debug("Raw interview question response: %s", content)
         
         # Extract and parse the questions
         try:
@@ -149,12 +143,12 @@ Challenge the user to craft a system message that is flawless and precise, ensur
                 else:
                     # If no JSON array is found, split by newlines and clean up
                     questions = [q.strip() for q in content.split('\n') if q.strip()]
-            except Exception as e:
+            except Exception:
                 # Fallback if all parsing attempts fail
-                print(f"Error parsing questions: {e}")
+                logger.exception("Error parsing questions from model response")
                 questions = [content]
         
-        print(f"Parsed questions: {questions}")
+        logger.debug("Parsed interview questions: %s", questions)
         self.interview_questions = questions
         return questions
     
@@ -222,7 +216,7 @@ Provide your evaluation in JSON format with the following structure:
         Please evaluate this response.
         """
         
-        print(f"Evaluating answer for question: {question}")
+        logger.info("Evaluating answer for question: %s", question)
         
         # Generate evaluation using ChatGPT API
         response = await self.client.chat.completions.create(
@@ -236,19 +230,19 @@ Provide your evaluation in JSON format with the following structure:
         
         # Extract and parse the evaluation
         content = response.choices[0].message.content
-        print(f"Raw evaluation response: {content}")
+        logger.debug("Raw evaluation response: %s", content)
         
         try:
             # Try to directly parse the JSON
             evaluation = json.loads(content)
-            print(f"Successfully parsed evaluation JSON: {evaluation}")
+            logger.debug("Successfully parsed evaluation JSON: %s", evaluation)
             
             # Ensure all required fields are present
             required_fields = ["score", "strengths", "weaknesses", "feedback", "example_improvement"]
             missing_fields = [field for field in required_fields if field not in evaluation]
             
             if missing_fields:
-                print(f"Warning: Missing fields in evaluation response: {missing_fields}")
+                logger.warning("Missing fields in evaluation response: %s", missing_fields)
                 # Add default values for missing fields
                 for field in missing_fields:
                     if field == "score":
@@ -259,7 +253,7 @@ Provide your evaluation in JSON format with the following structure:
                         evaluation[field] = f"No {field.replace('_', ' ')} provided"
                 
         except json.JSONDecodeError as e:
-            print(f"Error parsing evaluation JSON: {e}")
+            logger.exception("Error parsing evaluation JSON")
             
             # Try to extract JSON from the text
             try:
@@ -267,13 +261,13 @@ Provide your evaluation in JSON format with the following structure:
                 match = re.search(r'\{.*\}', content, re.DOTALL)
                 if match:
                     json_str = match.group(0)
-                    print(f"Extracted JSON string: {json_str}")
+                    logger.debug("Extracted JSON string: %s", json_str)
                     evaluation = json.loads(json_str)
-                    print(f"Successfully parsed extracted JSON: {evaluation}")
+                    logger.debug("Successfully parsed extracted JSON: %s", evaluation)
                 else:
                     raise ValueError("No JSON structure found in response")
             except Exception as e2:
-                print(f"Error extracting JSON: {e2}")
+                logger.exception("Error extracting JSON when parsing evaluation response")
                 # Fallback to text response
                 evaluation = {
                     "score": 5,
@@ -282,7 +276,7 @@ Provide your evaluation in JSON format with the following structure:
                     "feedback": content,
                     "example_improvement": "N/A"
                 }
-                print(f"Using fallback evaluation: {evaluation}")
+                logger.info("Using fallback evaluation: %s", evaluation)
         
         # Store feedback in history
         self.feedback_history.append(evaluation)
@@ -327,32 +321,25 @@ Provide your evaluation in JSON format with the following structure:
         return response.choices[0].message.content
     
     async def start(self) -> None:
-        """Start the interview agent."""
-        print("Starting Interview Practice Agent")
-        await self.connect()
-        
-    async def connect(self) -> None:
-        """Connect to LiveKit (simplified implementation)."""
-        print(f"Connected to LiveKit at {self.livekit_url}")
-        # In a real implementation, we would connect to the LiveKit server here
-        # For now, we'll just simulate a successful connection
+        """Initialize the interview agent (placeholder for backward compatibility)."""
+        logger.info("Interview Practice Agent ready with OpenAI backend only")
 
     async def send_message(self, participant, message):
         """Send a message to a participant (simplified implementation)."""
-        print(f"[AGENT] Sending message to participant: {message}")
+        logger.debug("[AGENT] Sending message to participant: %s", message)
         
     async def send_audio(self, participant, text):
         """Send audio to a participant (simplified implementation)."""
-        print(f"[AGENT] Converting to audio and sending: {text}")
+        logger.debug("[AGENT] Converting to audio and sending: %s", text)
     
     async def process_interview_question(self, participant, question_index):
         """Process an interview question (simplified implementation)."""
-        print(f"[AGENT] Processing interview question {question_index}")
+        logger.debug("[AGENT] Processing interview question %s", question_index)
     
     async def process_answer_evaluation(self, participant, question, answer):
         """Process answer evaluation (simplified implementation)."""
-        print(f"[AGENT] Evaluating answer for question: {question}")
+        logger.debug("[AGENT] Evaluating answer for question: %s", question)
         
     async def process_interview_summary(self, participant):
         """Process interview summary (simplified implementation)."""
-        print(f"[AGENT] Generating interview summary")
+        logger.debug("[AGENT] Generating interview summary")

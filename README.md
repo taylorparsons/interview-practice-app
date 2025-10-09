@@ -4,11 +4,54 @@
 An AI-powered interview practice application that helps job seekers prepare for interviews by generating personalized questions, providing real-time feedback, and offering example answers.
 
 ## Features
-- Resume and Job Description Upload
+- Resume upload plus job description file or text input
 - AI-Generated Interview Questions
 - Real-Time Answer Evaluation
 - Markdown-Formatted Example Answers
 - Tone and Content Feedback Analysis
+- Session autosave with one-click resume
+- Realtime Voice Interview Coach (OpenAI GPT Realtime + WebRTC)
+
+## Session Flow Overview
+```
++---------------------------+
+| Upload Documents (form)   |
++-------------+-------------+
+              |
+              v
++-------------+-------------+        Persisted to
+| Generate Questions API     |---+--> disk (`app/session_store/`)
++-------------+-------------+   |    + localStorage session id
+              |                 |
+              v                 |
++-------------+-------------+   |
+| Practice Question UI       |<--+
+|  - Answer textarea         |
+|  - Voice session controls  |
++-------------+-------------+
+              |
+              v
++-------------+-------------+
+| Evaluation Feedback panel  |
++-------------+-------------+
+              |
+              v
++-------------+-------------+
+| Summary + Restart options  |
++-------------+-------------+
+              |
+     +--------+--------+
+     | Resume Saved    |
+     | Session banner  |
+     +-----------------+
+```
+State is mirrored between the in-memory cache, JSON files under `app/session_store/`, and the browser’s `localStorage`. The upload screen surfaces a “Resume Saved Session” call-to-action whenever a session id is detected, enabling users to continue exactly where they left off.
+
+### Saving & Resuming Sessions
+1. Upload your resume and job description to start a new session. The server writes the session state to `app/session_store/<session_id>.json`, and the session id is cached in the browser.
+2. Each time you generate questions, submit answers, or receive feedback, the latest progress is auto-saved—there is no extra “Save” button.
+3. Return to the home page later: a banner above the upload form exposes **Resume Saved Session** (to reload) or **Clear Saved Session** (to delete the stored state).
+4. Clearing or restarting removes the session id from both local storage and disk, letting you begin a fresh interview run.
 
 ## Prerequisites
 - Python 3.9+
@@ -34,15 +77,31 @@ pip install -r requirements.txt
 ```
 
 4. Set Up Environment Variables
-Create a `.env` file with your OpenAI API key:
+Create a `.env` file with your OpenAI API key and optional realtime voice configuration:
 ```
 OPENAI_API_KEY=your_api_key_here
+# Optional realtime overrides
+OPENAI_REALTIME_MODEL=gpt-realtime-mini-2025-10-06
+OPENAI_REALTIME_VOICE=verse
+OPENAI_REALTIME_URL=https://api.openai.com/v1/realtime
 ```
 
 5. Run the Application
 ```bash
-python app.py
+./run.sh
 ```
+The script creates a virtual environment (if missing), installs requirements, and starts the development server with auto-reload by default.
+When the UI loads, upload your resume and either attach a job description file or paste its text directly into the job description field.
+
+## Helper Scripts
+- `./run.sh`: Boots the FastAPI server. Add `--no-reload` to disable auto-reload or `--python 3.11` to select a Python version.
+- `./test.sh`: Runs the test suite with `pytest -q`. Use `--health` to ping the running server (`http://localhost:8000` by default) after tests, or override the health-check target with `--url <base_url>`.
+
+## Realtime Voice Interviews
+- Upload your resume and job description to start a session, then click **Start Voice Session** to open a WebRTC call with the `gpt-realtime-mini-2025-10-06` coach.
+- The browser will prompt for microphone access—grant permission so the agent can hear you.
+- Conversation summaries stream into the transcript panel while audio plays through the embedded `<audio>` element.
+- Use **Stop Voice Session** to release the connection, or restart the interview to reset the voice UI.
 
 ## Technologies Used
 - Flask

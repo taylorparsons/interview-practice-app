@@ -2,6 +2,8 @@
 venv/
 *.env
 
+#secrets 
+.env 
 # Python cache files
 __pycache__/
 *.py[cod]
@@ -33,3 +35,9 @@ node_modules/
 # OpenAI and sensitive config
 .openai_config
 config.py
+
+# Persisted sessions
+app/session_store/
+
+# Uploaded documents
+app/uploads/

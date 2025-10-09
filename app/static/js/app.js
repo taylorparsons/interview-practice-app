@@ -1,17 +1,32 @@
 // app/static/js/app.js
 
 // State management
-let state = {
-    sessionId: null,
-    questions: [],
-    currentQuestionIndex: 0,
-    answers: [],
-    evaluations: [],
-    room: null,
-    participant: null,
-    isRecording: false,
-    recognition: null
-};
+function createInitialVoiceState() {
+    return {
+        peer: null,
+        dataChannel: null,
+        localStream: null,
+        remoteStream: null,
+        transcriptBuffer: '',
+    };
+}
+
+function createInitialState() {
+    return {
+        sessionId: null,
+        questions: [],
+        currentQuestionIndex: 0,
+        answers: [],
+        evaluations: [],
+        room: null,
+        participant: null,
+        isRecording: false,
+        recognition: null,
+        voice: createInitialVoiceState(),
+    };
+}
+
+let state = createInitialState();
 
 // DOM elements
 const uploadSection = document.getElementById('upload-section');
@@ -20,6 +35,10 @@ const interviewSection = document.getElementById('interview-section');
 const feedbackSection = document.getElementById('feedback-section');
 const exampleSection = document.getElementById('example-section');
 const summarySection = document.getElementById('summary-section');
+const interviewContainer = document.getElementById('interview-container');
+const resumeActions = document.getElementById('resume-actions');
+const resumeSessionBtn = document.getElementById('resume-session');
+const clearSessionBtn = document.getElementById('clear-session');
 
 const uploadForm = document.getElementById('upload-form');
 const currentQuestion = document.getElementById('current-question');
@@ -37,11 +56,325 @@ const improvementsFeedback = document.getElementById('improvements-feedback');
 const contentFeedback = document.getElementById('content-feedback');
 const toneFeedback = document.getElementById('tone-feedback');
 const exampleAnswer = document.getElementById('example-answer');
+const exampleQuestion = document.getElementById('example-question');
 
 const averageScore = document.getElementById('average-score');
 const averageScoreBar = document.getElementById('average-score-bar');
 const overallStrengths = document.getElementById('overall-strengths');
 const overallImprovements = document.getElementById('overall-improvements');
+
+const startVoiceBtn = document.getElementById('start-voice');
+const stopVoiceBtn = document.getElementById('stop-voice');
+const voiceStatus = document.getElementById('voice-status');
+const voiceTranscript = document.getElementById('voice-transcript');
+const voiceAudio = document.getElementById('voice-audio');
+
+const voiceStatusClasses = {
+    idle: 'text-gray-500',
+    pending: 'text-amber-600',
+    live: 'text-green-600',
+    error: 'text-red-600'
+};
+
+function setVoiceControls(active) {
+    if (startVoiceBtn) {
+        startVoiceBtn.classList.toggle('hidden', active);
+    }
+    if (stopVoiceBtn) {
+        stopVoiceBtn.classList.toggle('hidden', !active);
+    }
+}
+
+function setVoiceEnabled(enabled) {
+    if (!startVoiceBtn) {
+        return;
+    }
+    startVoiceBtn.disabled = !enabled;
+    startVoiceBtn.classList.toggle('opacity-50', !enabled);
+    startVoiceBtn.classList.toggle('cursor-not-allowed', !enabled);
+}
+
+function updateVoiceStatus(message, tone = 'idle') {
+    if (!voiceStatus) {
+        return;
+    }
+    const toneClass = voiceStatusClasses[tone] || voiceStatusClasses.idle;
+    voiceStatus.className = `text-sm font-medium ${toneClass}`;
+    voiceStatus.textContent = message;
+}
+
+function clearVoiceTranscript() {
+    if (!voiceTranscript) {
+        return;
+    }
+    if (state && state.voice) {
+        state.voice.transcriptBuffer = '';
+    }
+    voiceTranscript.dataset.empty = 'true';
+    voiceTranscript.innerHTML = '<p class="text-xs text-gray-500">Voice transcripts will appear here once the realtime session begins.</p>';
+}
+
+function appendVoiceMessage(role, message) {
+    if (!voiceTranscript || !message) {
+        return;
+    }
+
+    const text = message.trim();
+    if (!text) {
+        return;
+    }
+
+    if (voiceTranscript.dataset.empty === 'true') {
+        voiceTranscript.innerHTML = '';
+        delete voiceTranscript.dataset.empty;
+    }
+
+    const wrapper = document.createElement('div');
+
+    if (role === 'agent') {
+        wrapper.className = 'bg-indigo-50 border border-indigo-100 text-indigo-800 text-sm rounded-lg p-3';
+    } else if (role === 'user') {
+        wrapper.className = 'bg-white border border-gray-200 text-gray-800 text-sm rounded-lg p-3';
+    } else {
+        wrapper.className = 'text-xs text-gray-500';
+    }
+
+    if (role === 'agent' || role === 'user') {
+        const label = document.createElement('div');
+        label.className = 'text-xs uppercase tracking-wide font-semibold mb-1';
+        label.textContent = role === 'agent' ? 'Coach' : 'You';
+        wrapper.appendChild(label);
+
+        const content = document.createElement('p');
+        content.textContent = text;
+        wrapper.appendChild(content);
+    } else {
+        wrapper.textContent = text;
+    }
+
+    voiceTranscript.appendChild(wrapper);
+    voiceTranscript.scrollTop = voiceTranscript.scrollHeight;
+}
+
+function handleVoiceEvent(event) {
+    if (!event || !event.type) {
+        return;
+    }
+
+    switch (event.type) {
+        case 'response.output_text.delta': {
+            const delta = event.delta || event.text || '';
+            state.voice.transcriptBuffer += delta;
+            break;
+        }
+        case 'response.output_text.done':
+        case 'response.completed': {
+            if (state.voice.transcriptBuffer.trim()) {
+                appendVoiceMessage('agent', state.voice.transcriptBuffer.trim());
+            }
+            state.voice.transcriptBuffer = '';
+            break;
+        }
+        case 'response.error': {
+            const errorMessage = (event.error && event.error.message) || 'Realtime agent reported an error.';
+            appendVoiceMessage('system', `Warning: ${errorMessage}`);
+            updateVoiceStatus('Error', 'error');
+            state.voice.transcriptBuffer = '';
+            break;
+        }
+        case 'conversation.item.input_audio_transcription.completed':
+        case 'input_audio_buffer.speech_transcribed': {
+            const transcriptText = event.transcript || event.text || '';
+            if (transcriptText) {
+                appendVoiceMessage('user', transcriptText);
+            }
+            break;
+        }
+        default: {
+            if (event.type && event.type.startsWith('response.audio')) {
+                return;
+            }
+            if (event.type !== 'response.created' && event.type !== 'response.output_text.created') {
+                console.debug('Voice event:', event);
+            }
+        }
+    }
+}
+
+async function startVoiceInterview() {
+    if (!state.sessionId) {
+        alert('Upload your documents to start a practice session before enabling voice coaching.');
+        return;
+    }
+
+    if (state.voice.peer) {
+        console.debug('Voice interview already active');
+        return;
+    }
+
+    setVoiceControls(true);
+    updateVoiceStatus('Connecting...', 'pending');
+    if (voiceTranscript && voiceTranscript.dataset.empty !== 'true') {
+        appendVoiceMessage('system', '--- Starting new voice session ---');
+    }
+
+    try {
+        const response = await fetch('/voice/session', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                session_id: state.sessionId
+            })
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(errorText || 'Failed to initialize voice session');
+        }
+
+        const data = await response.json();
+        const { client_secret: clientSecret, model, url } = data;
+
+        if (!clientSecret) {
+            throw new Error('Realtime session did not return a client secret');
+        }
+
+        const peer = new RTCPeerConnection();
+        state.voice.peer = peer;
+
+        const dataChannel = peer.createDataChannel('oai-events');
+        state.voice.dataChannel = dataChannel;
+
+        dataChannel.onmessage = (event) => {
+            try {
+                const payload = JSON.parse(event.data);
+                handleVoiceEvent(payload);
+            } catch (err) {
+                console.debug('Non-JSON voice event payload:', event.data);
+            }
+        };
+
+        dataChannel.onopen = () => {
+            updateVoiceStatus('Live', 'live');
+            const openingQuestion =
+                state.questions[state.currentQuestionIndex] ||
+                state.questions[0] ||
+                'Tell me about yourself.';
+
+            try {
+                dataChannel.send(JSON.stringify({
+                    type: 'response.create',
+                    response: {
+                        modalities: ['audio', 'text'],
+                        instructions: `Begin the interview. Greet the candidate and ask: "${openingQuestion}". Wait for their response before giving concise feedback.`,
+                    }
+                }));
+            } catch (sendError) {
+                console.debug('Failed to send initial realtime instruction:', sendError);
+            }
+        };
+
+        dataChannel.onclose = () => {
+            if (peer.connectionState !== 'closed') {
+                updateVoiceStatus('Voice channel closed', 'idle');
+            }
+        };
+
+        peer.onconnectionstatechange = () => {
+            if (peer.connectionState === 'connected') {
+                updateVoiceStatus('Live', 'live');
+            } else if (['disconnected', 'failed'].includes(peer.connectionState)) {
+                updateVoiceStatus('Disconnected', 'error');
+                stopVoiceInterview({ silent: true, preserveStatus: true });
+            }
+        };
+
+        const localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        state.voice.localStream = localStream;
+        localStream.getTracks().forEach(track => peer.addTrack(track, localStream));
+
+        peer.ontrack = (event) => {
+            if (!voiceAudio) {
+                return;
+            }
+
+            const [remoteStream] = event.streams;
+            if (voiceAudio.srcObject !== remoteStream) {
+                voiceAudio.srcObject = remoteStream;
+                voiceAudio.classList.remove('hidden');
+                voiceAudio.play().catch(err => console.debug('Autoplay blocked:', err));
+            }
+        };
+
+        const offer = await peer.createOffer();
+        await peer.setLocalDescription(offer);
+
+        const realtimeUrl = `${url}?model=${encodeURIComponent(model)}`;
+        const sdpResponse = await fetch(realtimeUrl, {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${clientSecret}`,
+                'Content-Type': 'application/sdp',
+                'OpenAI-Beta': 'realtime=v1'
+            },
+            body: offer.sdp
+        });
+
+        if (!sdpResponse.ok) {
+            const errText = await sdpResponse.text();
+            throw new Error(errText || 'Failed to negotiate realtime session');
+        }
+
+        const answer = await sdpResponse.text();
+        await peer.setRemoteDescription({ type: 'answer', sdp: answer });
+        updateVoiceStatus('Live', 'live');
+    } catch (error) {
+        console.error('Voice session error:', error);
+        appendVoiceMessage('system', `Voice session error: ${error.message}`);
+        updateVoiceStatus('Connection failed', 'error');
+        stopVoiceInterview({ silent: true, preserveStatus: true });
+        setVoiceControls(false);
+    }
+}
+
+function stopVoiceInterview(options = {}) {
+    const { silent = false, preserveStatus = false } = options;
+
+    if (state.voice.dataChannel) {
+        try {
+            state.voice.dataChannel.close();
+        } catch (error) {
+            console.debug('Error closing realtime data channel:', error);
+        }
+    }
+
+    if (state.voice.peer) {
+        try {
+            state.voice.peer.close();
+        } catch (error) {
+            console.debug('Error closing realtime peer connection:', error);
+        }
+    }
+
+    if (state.voice.localStream) {
+        state.voice.localStream.getTracks().forEach(track => track.stop());
+    }
+
+    if (voiceAudio) {
+        voiceAudio.srcObject = null;
+        voiceAudio.classList.add('hidden');
+    }
+
+    state.voice = createInitialVoiceState();
+
+    if (!preserveStatus) {
+        updateVoiceStatus(silent ? 'Offline' : 'Voice session ended', 'idle');
+    }
+
+    setVoiceControls(false);
+}
 
 // Speech Recognition Setup
 function setupSpeechRecognition() {
@@ -90,6 +423,7 @@ function setupSpeechRecognition() {
     
     return true;
 }
+
 
 // Create and add microphone button
 function createMicButton() {
@@ -187,43 +521,245 @@ function stopRecording() {
 document.addEventListener('DOMContentLoaded', () => {
     setupEventListeners();
     setupSpeechRecognition();
+    clearVoiceTranscript();
+    updateVoiceStatus('Offline', 'idle');
+    setVoiceControls(false);
+    setVoiceEnabled(false);
+    updateResumeControlsVisibility();
+});
+
+window.addEventListener('beforeunload', () => {
+    stopVoiceInterview({ silent: true, preserveStatus: true });
 });
 
 function setupEventListeners() {
+    if (resumeSessionBtn) {
+        resumeSessionBtn.addEventListener('click', (event) => {
+            event.preventDefault();
+            resumeSavedSession();
+        });
+    }
+
+    if (clearSessionBtn) {
+        clearSessionBtn.addEventListener('click', async (event) => {
+            event.preventDefault();
+            await clearSavedSession();
+        });
+    }
+
     // Handle form submission
-    uploadForm.addEventListener('submit', handleDocumentUpload);
-    
+    if (uploadForm) {
+        uploadForm.addEventListener('submit', handleDocumentUpload);
+    }
+
     // Answer submission
-    answerBtn.addEventListener('click', handleAnswerSubmission);
-    
+    if (answerBtn) {
+        answerBtn.addEventListener('click', handleAnswerSubmission);
+    }
+
     // Get example answer
-    getExampleBtn.addEventListener('click', handleGetExample);
-    
+    if (getExampleBtn) {
+        getExampleBtn.addEventListener('click', handleGetExample);
+    }
+
     // Next question
-    nextQuestionBtn.addEventListener('click', handleNextQuestion);
-    
+    if (nextQuestionBtn) {
+        nextQuestionBtn.addEventListener('click', handleNextQuestion);
+    }
+
     // Back to interview
-    backToInterviewBtn.addEventListener('click', () => {
-        exampleSection.classList.add('hidden');
-        document.getElementById('interview-container').classList.remove('hidden');
-    });
-    
+    if (backToInterviewBtn) {
+        backToInterviewBtn.addEventListener('click', () => {
+            exampleSection.classList.add('hidden');
+            if (exampleQuestion) {
+                exampleQuestion.textContent = '';
+                exampleQuestion.classList.add('hidden');
+            }
+            if (interviewContainer) {
+                interviewContainer.classList.remove('hidden');
+            }
+        });
+    }
+
     // Restart interview
-    restartInterviewBtn.addEventListener('click', handleRestartInterview);
+    if (restartInterviewBtn) {
+        restartInterviewBtn.addEventListener('click', handleRestartInterview);
+    }
+
+    if (startVoiceBtn) {
+        startVoiceBtn.addEventListener('click', startVoiceInterview);
+    }
+
+    if (stopVoiceBtn) {
+        stopVoiceBtn.addEventListener('click', () => stopVoiceInterview());
+    }
+}
+
+function updateResumeControlsVisibility() {
+    if (!resumeActions) {
+        return;
+    }
+    const savedId = localStorage.getItem('interviewSessionId');
+    resumeActions.classList.toggle('hidden', !savedId);
+}
+
+async function resumeSavedSession() {
+    const savedSessionId = localStorage.getItem('interviewSessionId');
+    if (!savedSessionId) {
+        alert('No saved session was found.');
+        updateResumeControlsVisibility();
+        return;
+    }
+
+    try {
+        stopVoiceInterview({ silent: true });
+        clearVoiceTranscript();
+        updateVoiceStatus('Offline', 'idle');
+        setVoiceControls(false);
+        setVoiceEnabled(false);
+
+        if (uploadSection) {
+            uploadSection.classList.add('hidden');
+        }
+        if (loadingSection) {
+            loadingSection.classList.remove('hidden');
+        }
+
+        const response = await fetch(`/session/${savedSessionId}`);
+        if (!response.ok) {
+            throw new Error('Failed to load saved session');
+        }
+
+        const data = await response.json();
+
+        state = createInitialState();
+        state.sessionId = data.session_id;
+        state.questions = data.questions || [];
+        state.answers = data.answers || [];
+        state.evaluations = data.evaluations || [];
+
+        const persistedIndex = typeof data.current_question_index === 'number'
+            ? data.current_question_index
+            : state.answers.length;
+        const clampedIndex = Math.max(0, Math.min(persistedIndex, state.questions.length));
+        state.currentQuestionIndex = clampedIndex >= state.questions.length && state.questions.length > 0
+            ? state.questions.length - 1
+            : clampedIndex;
+
+        if (loadingSection) {
+            loadingSection.classList.add('hidden');
+        }
+        if (interviewSection) {
+            interviewSection.classList.remove('hidden');
+        }
+
+        setVoiceControls(false);
+        const hasQuestions = state.questions.length > 0;
+        setVoiceEnabled(hasQuestions);
+        updateVoiceStatus(hasQuestions ? 'Ready for voice coaching' : 'Offline', 'idle');
+        clearVoiceTranscript();
+
+        if (!hasQuestions) {
+            if (interviewContainer) {
+                interviewContainer.classList.remove('hidden');
+            }
+            currentQuestion.textContent = 'No questions available yet. Generate questions to begin.';
+            feedbackSection.classList.add('hidden');
+            exampleSection.classList.add('hidden');
+            summarySection.classList.add('hidden');
+            updateResumeControlsVisibility();
+            return;
+        }
+
+        if (clampedIndex >= state.questions.length) {
+            displaySummary();
+        } else {
+            displayQuestion(clampedIndex);
+            if (state.evaluations.length > 0) {
+                nextQuestionBtn.textContent = clampedIndex >= state.questions.length - 1 ? 'See Summary' : 'Next Question';
+            }
+        }
+
+        updateResumeControlsVisibility();
+    } catch (error) {
+        console.error('Error resuming session:', error);
+        alert('Unable to resume the saved session. It may have expired or been removed.');
+        localStorage.removeItem('interviewSessionId');
+        updateResumeControlsVisibility();
+        if (loadingSection) {
+            loadingSection.classList.add('hidden');
+        }
+        if (uploadSection) {
+            uploadSection.classList.remove('hidden');
+        }
+    }
+}
+
+async function clearSavedSession() {
+    const savedSessionId = localStorage.getItem('interviewSessionId');
+    if (!savedSessionId) {
+        updateResumeControlsVisibility();
+        return;
+    }
+
+    const confirmed = window.confirm('This will permanently remove your saved session. Continue?');
+    if (!confirmed) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/session/${savedSessionId}`, { method: 'DELETE' });
+        if (!response.ok && response.status !== 404) {
+            throw new Error('Failed to delete saved session');
+        }
+    } catch (error) {
+        console.error('Error clearing saved session:', error);
+        alert('Unable to clear the saved session right now. Please try again.');
+        return;
+    }
+
+    localStorage.removeItem('interviewSessionId');
+    updateResumeControlsVisibility();
+    if (state.sessionId === savedSessionId) {
+        handleRestartInterview();
+    }
 }
 
 // Handle document upload
 async function handleDocumentUpload(e) {
     e.preventDefault();
     
+    const resumeInput = document.getElementById('resume');
+    const jobFileInput = document.getElementById('job-description');
+    const jobTextInput = document.getElementById('job-description-text');
+
+    const resumeFile = resumeInput.files[0];
+    const jobFile = jobFileInput.files[0];
+    const jobText = jobTextInput.value.trim();
+
+    if (!resumeFile) {
+        alert('Please upload your resume to continue.');
+        return;
+    }
+
+    if (!jobFile && !jobText) {
+        alert('Please upload a job description file or paste the job description text.');
+        return;
+    }
+
     // Show loading section
     uploadSection.classList.add('hidden');
     loadingSection.classList.remove('hidden');
     
     // Get form data
     const formData = new FormData();
-    formData.append('resume', document.getElementById('resume').files[0]);
-    formData.append('job_description', document.getElementById('job-description').files[0]);
+    formData.append('resume', resumeFile);
+    if (jobFile) {
+        formData.append('job_description', jobFile);
+    }
+    if (jobText) {
+        formData.append('job_description_text', jobText);
+    }
     
     try {
         // Upload documents
@@ -238,13 +774,12 @@ async function handleDocumentUpload(e) {
         
         const data = await response.json();
         state.sessionId = data.session_id;
+        localStorage.setItem('interviewSessionId', state.sessionId);
+        updateResumeControlsVisibility();
         
         // Generate questions
         await generateQuestions();
-        
-        // Connect to room
-        await connectToRoom(state.sessionId);
-        
+
         // Show interview section
         loadingSection.classList.add('hidden');
         interviewSection.classList.remove('hidden');
@@ -282,27 +817,12 @@ async function generateQuestions() {
         
         const data = await response.json();
         state.questions = data.questions;
+        setVoiceEnabled(true);
+        updateVoiceStatus('Ready for voice coaching', 'idle');
+        clearVoiceTranscript();
         
     } catch (error) {
         console.error('Error generating questions:', error);
-        throw error;
-    }
-}
-
-// Connect to LiveKit room
-async function connectToRoom(sessionId) {
-    try {
-        const response = await fetch(`/session/${sessionId}`);
-        if (!response.ok) {
-            throw new Error('Failed to get session data');
-        }
-        
-        // For this implementation, we're not actually connecting to LiveKit yet
-        // In a real implementation, you would get a token and connect to the room
-        console.log('Would connect to LiveKit room here');
-        
-    } catch (error) {
-        console.error('Error connecting to room:', error);
         throw error;
     }
 }
@@ -320,9 +840,15 @@ function displayQuestion(index) {
     currentQuestion.textContent = question;
     answerInput.value = '';
     
-    document.getElementById('interview-container').classList.remove('hidden');
+    if (interviewContainer) {
+        interviewContainer.classList.remove('hidden');
+    }
     feedbackSection.classList.add('hidden');
     exampleSection.classList.add('hidden');
+    if (exampleQuestion) {
+        exampleQuestion.textContent = '';
+        exampleQuestion.classList.add('hidden');
+    }
 }
 
 // Handle answer submission
@@ -493,6 +1019,12 @@ function formatExampleAnswer(answer) {
 function displayExampleAnswer(answer) {
     const formattedAnswer = formatExampleAnswer(answer);
     
+    if (typeof showdown === 'undefined') {
+        // Gracefully fall back to plain text if showdown failed to load
+        exampleAnswer.textContent = formattedAnswer;
+        return;
+    }
+
     // Convert markdown to HTML for display
     const converter = new showdown.Converter();
     const htmlContent = converter.makeHtml(formattedAnswer);
@@ -522,15 +1054,17 @@ async function handleGetExample() {
         }
         
         const data = await response.json();
-        
-        // Hide interview container
-        document.getElementById('interview-container').classList.add('hidden');
+        if (exampleQuestion) {
+            exampleQuestion.textContent = `Question: ${question}`;
+            exampleQuestion.classList.remove('hidden');
+        }
         
         // Set example answer
         displayExampleAnswer(data.answer);
         
         // Show example section
         exampleSection.classList.remove('hidden');
+        exampleSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
         
     } catch (error) {
         console.error('Error:', error);
@@ -551,17 +1085,29 @@ function handleNextQuestion() {
 // Display interview summary
 function displaySummary() {
     // Hide other sections
-    document.getElementById('interview-container').classList.add('hidden');
+    if (interviewContainer) {
+        interviewContainer.classList.add('hidden');
+    }
     feedbackSection.classList.add('hidden');
     exampleSection.classList.add('hidden');
+    if (exampleQuestion) {
+        exampleQuestion.textContent = '';
+        exampleQuestion.classList.add('hidden');
+    }
     
     // Calculate average score
-    const totalScore = state.evaluations.reduce((sum, eval) => sum + eval.score, 0);
-    const avgScore = totalScore / state.evaluations.length;
+    const totalScore = state.evaluations.reduce((sum, eval) => sum + (eval.score || 0), 0);
+    const evaluationCount = state.evaluations.length;
+    const avgScore = evaluationCount > 0 ? totalScore / evaluationCount : 0;
     
     // Set summary values
-    averageScore.textContent = `${avgScore.toFixed(1)}/10`;
-    averageScoreBar.style.width = `${avgScore * 10}%`;
+    if (evaluationCount > 0) {
+        averageScore.textContent = `${avgScore.toFixed(1)}/10`;
+        averageScoreBar.style.width = `${Math.min(100, Math.max(0, avgScore * 10))}%`;
+    } else {
+        averageScore.textContent = 'N/A';
+        averageScoreBar.style.width = '0%';
+    }
     
     // Clear previous lists
     overallStrengths.innerHTML = '';
@@ -573,10 +1119,13 @@ function displaySummary() {
     
     state.evaluations.forEach(eval => {
         if (eval.strengths) {
-            strengths.add(eval.strengths);
+            strengths.add(Array.isArray(eval.strengths) ? eval.strengths.join(', ') : eval.strengths);
         }
         if (eval.weaknesses) {
-            improvements.add(eval.weaknesses);
+            improvements.add(Array.isArray(eval.weaknesses) ? eval.weaknesses.join(', ') : eval.weaknesses);
+        }
+        if (eval.improvements && !eval.weaknesses) {
+            improvements.add(Array.isArray(eval.improvements) ? eval.improvements.join(', ') : eval.improvements);
         }
     });
     
@@ -599,18 +1148,10 @@ function displaySummary() {
 
 // Handle restarting interview
 function handleRestartInterview() {
+    stopVoiceInterview({ silent: true });
+
     // Reset state
-    state = {
-        sessionId: null,
-        questions: [],
-        currentQuestionIndex: 0,
-        answers: [],
-        evaluations: [],
-        room: null,
-        participant: null,
-        isRecording: false,
-        recognition: null
-    };
+    state = createInitialState();
     
     // Hide sections
     interviewSection.classList.add('hidden');
@@ -619,7 +1160,14 @@ function handleRestartInterview() {
     // Clear form fields
     document.getElementById('resume').value = '';
     document.getElementById('job-description').value = '';
+    document.getElementById('job-description-text').value = '';
     
+    setVoiceEnabled(false);
+    clearVoiceTranscript();
+    updateVoiceStatus('Offline', 'idle');
+    localStorage.removeItem('interviewSessionId');
+    updateResumeControlsVisibility();
+
     // Show upload section
     uploadSection.classList.remove('hidden');
 }
