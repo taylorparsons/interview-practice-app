@@ -118,7 +118,7 @@ These map to the Realtime session `turn_detection` payload. Set values, restart 
 Distributed under the MIT License. See `LICENSE` for more information.
 
 ## Contact
-Taylor Parsons - taylor.parsons@gmaio.com
+Taylor Parsons - taylor.parsons@gmail.com
 
 
 ---
