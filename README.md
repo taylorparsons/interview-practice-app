@@ -63,6 +63,7 @@ State is mirrored between the in-memory cache, JSON files under `app/session_sto
 ```bash
 git clone https://github.com/yourusername/interview-practice-app.git
 cd interview-practice-app
+chmod +x run.sh run_voice.sh test.sh kill.sh
 ```
 
 2. Create and Activate Virtual Environment
