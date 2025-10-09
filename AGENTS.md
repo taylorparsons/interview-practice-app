@@ -42,3 +42,32 @@
 - FastAPI server renders `index.html` and serves static assets.
 - Session data tracks uploads, questions, and evaluations in-memory.
 - `InterviewPracticeAgent` encapsulates AI interactions; endpoints fall back to heuristics if unavailable.
+
+## Local Logging
+- Files: `logs/app.log` (app + uvicorn/error) and `logs/access.log` (HTTP access).
+- Rotation on startup: existing non-empty logs are archived under
+  `logs/archive/YYYY-MM-DD_HH-MM-SS/` automatically.
+- Console: logs also stream to stdout/stderr as before.
+- Verbosity: set env vars before starting the app:
+  - `APP_LOG_LEVEL` (default `INFO`)
+  - `UVICORN_LOG_LEVEL` (default inherits APP_LOG_LEVEL)
+  - `UVICORN_ACCESS_LOG_LEVEL` (default `INFO`)
+- Format: set `APP_LOG_FORMAT=json` for structured JSON logs (default is text).
+- Context: each record includes `request_id` and, when present, `session_id`.
+- Headers: every response includes `X-Request-ID` for correlation.
+- Request lifecycle: middleware logs `request.start`, `request.end`, and `request.error` with
+  method, path, status, duration_ms, client IP, and user-agent (no bodies logged).
+- Agent retries: example/evaluation endpoints attempt the agent twice before fallback.
+  Look for `example.agent path … attempt=1/2`, `example.retry.start`, `evaluation.retry.start`,
+  and `evaluation.agent path … attempt=1/2` to confirm the retry flow.
+- Agent initialization logs now include the session id:
+  `session=<id> Initialized Interview Agent with OpenAI model: …`.
+- Supervisor process (uvicorn reload/parent) stdout/stderr is captured in `logs/uvicorn-supervisor.log`
+  (rotated to `logs/archive/<timestamp>_uvicorn-supervisor.log`). Use this when diagnosing errors
+  that appear in the terminal but not in `app.log`.
+
+Notes
+- Using `uvicorn --reload` restarts the app on file changes; each restart will archive
+  non-empty log files into a new timestamped folder.
+- To capture everything in one place while developing:
+  - `tail -f logs/app.log logs/access.log`

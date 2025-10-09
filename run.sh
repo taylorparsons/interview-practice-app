@@ -67,5 +67,22 @@ PORT="8000"
 RELOAD_FLAG="--reload"
 [[ "$RELOAD" -eq 0 ]] && RELOAD_FLAG=""
 
+LOG_DIR="$PROJECT_ROOT/logs"
+ARCHIVE_DIR="$LOG_DIR/archive"
+mkdir -p "$LOG_DIR" "$ARCHIVE_DIR"
+
+SUPERVISOR_LOG="$LOG_DIR/uvicorn-supervisor.log"
+if [[ -s "$SUPERVISOR_LOG" ]]; then
+  TS=$(date +"%Y-%m-%d_%H-%M-%S")
+  mv "$SUPERVISOR_LOG" "$ARCHIVE_DIR/${TS}_uvicorn-supervisor.log"
+fi
+
 echo "Starting server: http://${HOST}:${PORT}"
-exec uvicorn app.main:app --host "$HOST" --port "$PORT" $RELOAD_FLAG
+echo "Logs:    logs/app.log (app+uvicorn), logs/access.log (HTTP access)"
+echo "Archive: logs/archive/<YYYY-MM-DD_HH-MM-SS>/ (rotated on each start)"
+echo "Supervisor log (stdout/stderr): logs/uvicorn-supervisor.log"
+
+set +e
+uvicorn app.main:app --host "$HOST" --port "$PORT" $RELOAD_FLAG 2>&1 | tee "$SUPERVISOR_LOG"
+exit_code=${PIPESTATUS[0]}
+exit $exit_code

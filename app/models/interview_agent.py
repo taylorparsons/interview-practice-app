@@ -9,34 +9,15 @@ from openai import AsyncOpenAI
 
 logger = logging.getLogger(__name__)
 
-class InterviewPracticeAgent:
-    def __init__(
-        self,
-        openai_api_key: str,
-        openai_model: str,
-        resume_text: str,
-        job_description_text: str,
-    ):
-        # Initialize OpenAI client
-        self.client = AsyncOpenAI(api_key=openai_api_key)
-        self.openai_model = openai_model
-        
-        # Store document texts
-        self.resume_text = resume_text
-        self.job_description_text = job_description_text
-        
-        # Store interview state
-        self.current_question_index = 0
-        self.interview_questions = []
-        self.user_answers = []
-        self.feedback_history = []
-        self.interview_in_progress = False
-        
-        logger.info("Initialized Interview Agent with OpenAI model: %s", openai_model)
-    
-    async def generate_interview_questions(self, num_questions: int = 5) -> List[str]:
-        """Generate interview questions based on resume and job description."""
-        system_prompt = """
+
+def get_base_coach_prompt() -> str:
+    """Base system-level prompt used to define the interview coach persona.
+
+    Shared by text features and can be reused by the realtime voice agent
+    to ensure consistent behavior and tone.
+    """
+    return (
+        """
         # Role:
 You are a Ruthless Interview Preparation Coach. Your expertise lies in identifying and correcting any mistakes in communication, ensuring the user is always on point and ready to excel in high-pressure interview scenarios.
 
@@ -79,6 +60,39 @@ Challenge the user to craft a system message that is flawless and precise, ensur
 - **Respect the user's potential:** Acknowledge their capability to rise to the challenge.
 - **Stay rigorous and demanding:** Encourage a mindset of continuous improvement and excellence.
         """
+    ).strip()
+
+class InterviewPracticeAgent:
+    def __init__(
+        self,
+        openai_api_key: str,
+        openai_model: str,
+        resume_text: str,
+        job_description_text: str,
+        session_id: Optional[str] = None,
+    ):
+        # Initialize OpenAI client
+        self.client = AsyncOpenAI(api_key=openai_api_key)
+        self.openai_model = openai_model
+        self.session_id = session_id
+        
+        # Store document texts
+        self.resume_text = resume_text
+        self.job_description_text = job_description_text
+        
+        # Store interview state
+        self.current_question_index = 0
+        self.interview_questions = []
+        self.user_answers = []
+        self.feedback_history = []
+        self.interview_in_progress = False
+        
+        log_prefix = f"session={session_id} " if session_id else ""
+        logger.info("%sInitialized Interview Agent with OpenAI model: %s", log_prefix, openai_model)
+    
+    async def generate_interview_questions(self, num_questions: int = 5) -> List[str]:
+        """Generate interview questions based on resume and job description."""
+        system_prompt = get_base_coach_prompt()
         
         user_prompt = f"""
         Resume:
@@ -152,7 +166,7 @@ Challenge the user to craft a system message that is flawless and precise, ensur
         self.interview_questions = questions
         return questions
     
-    async def evaluate_answer(self, question: str, answer: str) -> Dict[str, Any]:
+    async def evaluate_answer(self, question: str, answer: str, voice_transcript: Optional[str] = None) -> Dict[str, Any]:
         """Evaluate candidate's answer to an interview question."""
         system_prompt = """
         # Role:
@@ -204,14 +218,19 @@ Provide your evaluation in JSON format with the following structure:
  "strengths": ["strength1", "strength2", ...],
  "weaknesses": ["weakness1", "weakness2", ...],
  "feedback": "detailed feedback with improvement suggestions",
+ "why_asked": "brief explanation of the interviewer intent/competency assessed",
  "example_improvement": "example of an improved answer"
 }
         """
         
+        vt = (voice_transcript or "").strip()
+        vt_block = f"\n\nVoice Transcript (if any):\n{vt}\n" if vt else ""
+
         user_prompt = f"""
         Interview Question: {question}
         
         Candidate's Answer: {answer}
+        {vt_block}
         
         Please evaluate this response.
         """
@@ -238,7 +257,7 @@ Provide your evaluation in JSON format with the following structure:
             logger.debug("Successfully parsed evaluation JSON: %s", evaluation)
             
             # Ensure all required fields are present
-            required_fields = ["score", "strengths", "weaknesses", "feedback", "example_improvement"]
+            required_fields = ["score", "strengths", "weaknesses", "feedback", "example_improvement", "why_asked"]
             missing_fields = [field for field in required_fields if field not in evaluation]
             
             if missing_fields:
@@ -285,15 +304,21 @@ Provide your evaluation in JSON format with the following structure:
     
     async def generate_example_answer(self, question: str) -> str:
         """Generate an example good answer to an interview question."""
-        system_prompt = """
-        You are an expert interview coach helping candidates prepare for job interviews.
-        Provide an exemplary answer to the given interview question.
-        The answer should be:
-        1. Clear, concise, and well-structured
-        2. Include specific examples where appropriate
-        3. Demonstrate relevant skills and experiences
-        4. Address the underlying competency being tested
-        5. Sound natural and conversational, not rehearsed
+        base_prompt = get_base_coach_prompt()
+        system_prompt = f"""
+{base_prompt}
+
+You are now providing a tailored, exemplary answer to the candidate's interview question.
+
+Requirements:
+- Draw directly from the candidate's resume wherever relevant (roles, companies, projects, technologies, metrics, scope, team size, timelines).
+- Align to the job description priorities and mirror key terminology for the role.
+- When applicable, structure with STAR + I (Situation, Task, Action, Result, Impact) and quantify outcomes with concrete numbers.
+- Keep tone confident, concise, and conversational (not scripted).
+- Target length ~120–220 words unless the question demands more.
+
+Output:
+- Return only the answer text, no preface, labels, or lists unless the question explicitly asks for them.
         """
         
         user_prompt = f"""

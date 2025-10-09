@@ -91,12 +91,22 @@ When the UI loads, upload your resume and either attach a job description file o
 - Conversation summaries stream into the transcript panel while audio plays through the embedded `<audio>` element.
 - Use **Stop Voice Session** to release the connection, or restart the interview to reset the voice UI.
 
+### Voice Turn Detection (VAD) settings
+You can control server-side turn detection behavior via environment variables in `.env`:
+
+- `OPENAI_TURN_DETECTION` = `server_vad` (default) or `none`
+- `OPENAI_TURN_THRESHOLD` = `0.5` (float string)
+- `OPENAI_TURN_PREFIX_MS` = `300` (milliseconds)
+- `OPENAI_TURN_SILENCE_MS` = `500` (milliseconds)
+
+These map to the Realtime session `turn_detection` payload. Set values, restart the server, and start a new voice session to apply.
+
 ## Technologies Used
-- Flask
+- FastAPI
 - OpenAI GPT
 - Tailwind CSS
 - Showdown.js
-- Python Machine Learning Libraries
+- Python libraries (PyPDF2, python-docx, scikit-learn, nltk)
 
 ## Contributing
 1. Fork the repository

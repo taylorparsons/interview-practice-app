@@ -3,6 +3,7 @@ import os
 import asyncio
 import textwrap
 import uuid
+from datetime import datetime
 from typing import List, Dict, Any, Optional
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Depends, BackgroundTasks
 from fastapi.responses import JSONResponse, HTMLResponse
@@ -17,15 +18,20 @@ import uvicorn
 from app.config import (
     OPENAI_API_KEY, OPENAI_MODEL, OPENAI_REALTIME_MODEL,
     OPENAI_REALTIME_VOICE, OPENAI_REALTIME_URL,
-    UPLOAD_FOLDER, ALLOWED_EXTENSIONS
+    OPENAI_TURN_DETECTION, OPENAI_TURN_THRESHOLD, OPENAI_TURN_PREFIX_MS, OPENAI_TURN_SILENCE_MS,
+    UPLOAD_FOLDER, ALLOWED_EXTENSIONS,
 )
 from app.utils.document_processor import allowed_file, save_uploaded_file, save_text_as_file, process_documents
-from app.models.interview_agent import InterviewPracticeAgent
+from app.models.interview_agent import InterviewPracticeAgent, get_base_coach_prompt
 from app.logging_config import setup_logging
+from app.logging_context import session_id_var
+from app.middleware.request_logging import RequestLoggingMiddleware
 from app.utils.session_store import (
     save_session as persist_session,
     load_session as load_persisted_session,
     delete_session as delete_persisted_session,
+    list_sessions as list_persisted_sessions,
+    rename_session as rename_persisted_session,
 )
 
 setup_logging()
@@ -36,6 +42,9 @@ app = FastAPI(title="Interview Practice App")
 
 # Mount static files
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
+# Install structured request logging middleware (request id, timings)
+app.add_middleware(RequestLoggingMiddleware)
 
 # Setup templates
 templates = Jinja2Templates(directory="app/templates")
@@ -64,10 +73,81 @@ def _persist_session_state(session_id: str, session: Dict[str, Any]) -> None:
     persist_session(session_id, session)
 
 
+async def _ensure_agent_ready(session_id: str, session: Dict[str, Any], *, force_restart: bool = False) -> Dict[str, Any]:
+    """Ensure an agent is ready for the session, optionally forcing a restart."""
+    if force_restart and session.get("agent") is not None:
+        logger.info("agent.ensure.reset: session=%s", session_id)
+        session["agent"] = None
+        _persist_session_state(session_id, session)
+
+    if session.get("agent") is None:
+        logger.info("agent.ensure.start: session=%s", session_id)
+        try:
+            await start_agent(session_id)
+        except Exception:
+            logger.exception("agent.ensure.error: session=%s", session_id)
+        session = _get_session(session_id)
+        if session.get("agent") is None:
+            logger.warning("agent.ensure.unavailable: session=%s", session_id)
+        else:
+            logger.info("agent.ensure.ready: session=%s", session_id)
+
+    return session
+
+
+def _derive_session_name(job_desc_text: str) -> str:
+    """Heuristically derive a session name as 'title_company' from job description text."""
+    if not job_desc_text:
+        return "untitled_session"
+    text = (job_desc_text or "").strip()
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    head = "\n".join(lines[:20])  # examine first ~20 non-empty lines
+
+    import re
+
+    # Try explicit fields
+    title_match = re.search(r"(?im)^(?:job\s*title|title|position|role)\s*:\s*(.+)$", head)
+    comp_match = re.search(r"(?im)^(?:company|employer|organization)\s*:\s*(.+)$", head)
+
+    title = title_match and title_match.group(1).strip()
+    company = comp_match and comp_match.group(1).strip()
+
+    # Try 'Title at Company'
+    if not (title and company) and lines:
+        at_match = re.search(r"(?im)^(.{3,80}?)\s+at\s+([A-Za-z0-9 &\-.,]{2,80})$", lines[0])
+        if at_match:
+            if not title:
+                title = at_match.group(1).strip()
+            if not company:
+                company = at_match.group(2).strip()
+
+    # Try 'Company - Title' or 'Title - Company'
+    if not (title and company) and lines:
+        dash_line = lines[0]
+        if "-" in dash_line:
+            parts = [p.strip() for p in dash_line.split("-") if p.strip()]
+            if len(parts) >= 2:
+                # Assume first is title, second is company
+                title = title or parts[0]
+                company = company or parts[1]
+
+    # Fallbacks
+    title = title or "position"
+    company = company or "company"
+
+    def slugify(s: str) -> str:
+        s = s.lower()
+        s = re.sub(r"[^a-z0-9]+", "_", s).strip("_")
+        return s or "item"
+
+    return f"{slugify(title)}_{slugify(company)}"
+
+
 # Request and response models
 class DocumentUploadResponse(BaseModel):
     session_id: str
     message: str
+    name: Optional[str] = None
 
 
 class GenerateQuestionsRequest(BaseModel):
@@ -83,6 +163,7 @@ class EvaluateAnswerRequest(BaseModel):
     session_id: str
     question: str
     answer: str
+    voice_transcript: Optional[str] = None
 
 
 class EvaluateAnswerResponse(BaseModel):
@@ -109,6 +190,29 @@ class VoiceSessionResponse(BaseModel):
     client_secret: str
     url: str
     expires_at: Optional[int] = None
+
+
+class SessionListItem(BaseModel):
+    id: str
+    name: str
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    questions_count: Optional[int] = 0
+    answers_count: Optional[int] = 0
+
+
+class RenameSessionRequest(BaseModel):
+    name: str
+
+
+class SaveTranscriptRequest(BaseModel):
+    question_index: int
+    text: str
+
+
+class SaveAgentTextRequest(BaseModel):
+    question_index: int
+    text: str
 
 
 # Routes
@@ -157,16 +261,20 @@ async def upload_documents(
     resume_text, job_desc_text = await process_documents(resume_path, job_desc_path)
     
     # Store session data
+    default_name = _derive_session_name(job_desc_text)
     session_data = {
         "resume_path": resume_path,
         "job_desc_path": job_desc_path,
         "resume_text": resume_text,
         "job_desc_text": job_desc_text,
+        "name": default_name,
         "questions": [],
         "answers": [],
         "evaluations": [],
         "agent": None,
         "current_question_index": 0,
+        "created_at": datetime.utcnow().isoformat() + "Z",
+        "updated_at": datetime.utcnow().isoformat() + "Z",
     }
 
     _persist_session_state(session_id, session_data)
@@ -175,7 +283,7 @@ async def upload_documents(
     if background_tasks:
         background_tasks.add_task(start_agent, session_id)
     
-    return {"session_id": session_id, "message": "Documents uploaded successfully"}
+    return {"session_id": session_id, "message": "Documents uploaded successfully", "name": default_name}
 
 
 @app.post("/generate-questions", response_model=GenerateQuestionsResponse)
@@ -231,11 +339,39 @@ async def generate_questions(request: GenerateQuestionsRequest):
 async def evaluate_answer(request: EvaluateAnswerRequest):
     session_id = request.session_id
     session = _get_session(session_id)
+    # Bind session id into logging context for correlation
+    try:
+        session_id_var.set(session_id)
+    except Exception:
+        pass
 
-    if session.get("agent") is not None:
+    for attempt in range(2):
+        session = await _ensure_agent_ready(session_id, session, force_restart=attempt > 0)
+        agent = session.get("agent")
+        if agent is None:
+            continue
         try:
-            agent = session["agent"]
-            evaluation = await agent.evaluate_answer(request.question, request.answer)
+            # Determine question index and transcript (if any)
+            try:
+                idx = (session.get("questions") or []).index(request.question)
+            except ValueError:
+                idx = session.get("current_question_index", 0)
+            # Prefer client-provided transcript, fall back to persisted
+            transcript_text = (request.voice_transcript or "").strip()
+            if not transcript_text:
+                transcripts = session.get("voice_transcripts", {})
+                transcript_text = transcripts.get(str(idx)) or transcripts.get(idx) or ""
+
+            logger.info(
+                "evaluation.agent path: session=%s attempt=%s idx=%s q_len=%s a_len=%s t_present=%s",
+                session_id,
+                attempt + 1,
+                idx,
+                len(request.question or ""),
+                len(request.answer or ""),
+                bool(transcript_text and transcript_text.strip()),
+            )
+            evaluation = await agent.evaluate_answer(request.question, request.answer, transcript_text)
 
             if "answers" not in session:
                 session["answers"] = []
@@ -244,13 +380,36 @@ async def evaluate_answer(request: EvaluateAnswerRequest):
 
             session["answers"].append({"question": request.question, "answer": request.answer})
             session["evaluations"].append(evaluation)
+            # Store per-question evaluation array for downstream summary rendering
+            questions = session.get("questions") or []
+            try:
+                pidx = questions.index(request.question)
+            except ValueError:
+                pidx = len(session["answers"]) - 1
+            perq = session.get("per_question") or [None] * len(questions)
+            if len(perq) < len(questions):
+                perq.extend([None] * (len(questions) - len(perq)))
+            perq[pidx] = evaluation
+            session["per_question"] = perq
+
             session["current_question_index"] = len(session["answers"])
             _persist_session_state(session_id, session)
 
             return {"evaluation": evaluation}
         except Exception:
-            logger.exception("Error using agent to evaluate answer for session %s", session_id)
+            logger.exception(
+                "evaluation.agent error: session=%s attempt=%s", session_id, attempt + 1
+            )
+            # Drop the agent so a subsequent attempt can reinitialize
+            session["agent"] = None
+            _persist_session_state(session_id, session)
     
+    logger.info(
+        "evaluation.fallback path: session=%s q_len=%s a_len=%s",
+        session_id,
+        len(request.question or ""),
+        len(request.answer or ""),
+    )
     answer_length = len(request.answer)
     
     score = 0
@@ -300,6 +459,7 @@ async def evaluate_answer(request: EvaluateAnswerRequest):
         "score": score,
         "strengths": strengths,
         "improvements": improvements,
+        "weaknesses": improvements,
         "content": {
             "relevance": min(10, 5 + len(set(request.question.lower().split()).intersection(set(request.answer.lower().split())))),
             "depth": 5 if answer_length > 200 else 3
@@ -307,7 +467,10 @@ async def evaluate_answer(request: EvaluateAnswerRequest):
         "tone": {
             "clarity": 7,
             "professionalism": 8
-        }
+        },
+        "why_asked": "Assesses clarity, relevance to the question, and ability to tailor responses to the role.",
+        "feedback": "Your answer demonstrates some strengths. To improve, ensure you directly address the question up front, then use a brief STAR structure and quantify outcomes where possible.",
+        "example_improvement": "Provide a concise, structured answer with 1-2 concrete examples and measurable results."
     }
     
     if "answers" not in session:
@@ -318,6 +481,15 @@ async def evaluate_answer(request: EvaluateAnswerRequest):
     session["answers"].append({"question": request.question, "answer": request.answer})
     session["evaluations"].append(evaluation)
     session["current_question_index"] = len(session["answers"])
+    # Update per_question as well (backward compatible)
+    questions = session.get("questions") or []
+    idx = min(len(session["answers"]) - 1, max(0, len(questions) - 1)) if questions else len(session["answers"]) - 1
+    perq = session.get("per_question") or [None] * len(questions)
+    if len(perq) < len(questions):
+        perq.extend([None] * (len(questions) - len(perq)))
+    if questions:
+        perq[idx] = evaluation
+        session["per_question"] = perq
     _persist_session_state(session_id, session)
 
     return {"evaluation": evaluation}
@@ -327,17 +499,28 @@ async def evaluate_answer(request: EvaluateAnswerRequest):
 async def generate_example_answer(request: ExampleAnswerRequest):
     session_id = request.session_id
     session = _get_session(session_id)
+    # Bind session id into logging context for correlation
+    try:
+        session_id_var.set(session_id)
+    except Exception:
+        pass
 
-    if session.get("agent") is not None:
+    for attempt in range(2):
+        session = await _ensure_agent_ready(session_id, session, force_restart=attempt > 0)
+        agent = session.get("agent")
+        if agent is None:
+            continue
         try:
-            agent = session["agent"]
             example_answer = await agent.generate_example_answer(request.question)
-
+            logger.info("example.agent path: session=%s attempt=%s", session_id, attempt + 1)
             return {"answer": example_answer}
         except Exception:
-            logger.exception("Error generating example answer for session %s", session_id)
+            logger.exception("example.agent error: session=%s attempt=%s", session_id, attempt + 1)
+            session["agent"] = None
+            _persist_session_state(session_id, session)
     
     question = request.question.lower()
+    logger.info("example.fallback path: session=%s", session_id)
     
     if "experience" in question or "background" in question:
         answer = """I have over 5 years of experience in software development with a focus on full-stack web applications. My background includes working at both startups and established companies where I've contributed to all stages of the software development lifecycle. In my most recent role at TechCorp, I led the development of a customer-facing portal that increased customer engagement by 35% and reduced support tickets by 20%. Prior to that, I worked at InnovateX where I built RESTful APIs that improved system performance by 40%. My technical expertise includes JavaScript/TypeScript, React, Node.js, Python, and SQL databases."""
@@ -366,11 +549,49 @@ async def get_session_status(session_id: str):
 
     return {
         "session_id": session_id,
+        "name": session.get("name"),
         "questions": session["questions"],
         "answers": session["answers"],
         "evaluations": session["evaluations"],
         "current_question_index": session.get("current_question_index", 0),
+        "voice_transcripts": session.get("voice_transcripts", {}),
+        "per_question": session.get("per_question", []),
+        "voice_agent_text": session.get("voice_agent_text", {}),
     }
+
+
+@app.get("/session/{session_id}/documents")
+async def get_session_documents(session_id: str):
+    """Return raw resume and job description texts for a session."""
+    session = _get_session(session_id)
+    return {
+        "session_id": session_id,
+        "name": session.get("name"),
+        "resume_text": session.get("resume_text", ""),
+        "job_desc_text": session.get("job_desc_text", ""),
+    }
+
+
+@app.post("/session/{session_id}/voice-transcript")
+async def save_voice_transcript(session_id: str, payload: SaveTranscriptRequest):
+    """Persist voice transcript text for a given question index."""
+    session = _get_session(session_id)
+    vt = session.get("voice_transcripts") or {}
+    vt[str(payload.question_index)] = payload.text or ""
+    session["voice_transcripts"] = vt
+    _persist_session_state(session_id, session)
+    return {"ok": True}
+
+
+@app.post("/session/{session_id}/voice-agent-text")
+async def save_voice_agent_text(session_id: str, payload: SaveAgentTextRequest):
+    """Persist the coach's voice text output for a given question index."""
+    session = _get_session(session_id)
+    vat = session.get("voice_agent_text") or {}
+    vat[str(payload.question_index)] = payload.text or ""
+    session["voice_agent_text"] = vat
+    _persist_session_state(session_id, session)
+    return {"ok": True}
 
 
 @app.delete("/session/{session_id}")
@@ -389,6 +610,31 @@ async def delete_session(session_id: str):
     return {"message": "Session deleted successfully"}
 
 
+@app.get("/sessions", response_model=List[SessionListItem])
+async def list_sessions():
+    """List all saved sessions with basic metadata."""
+    items = list_persisted_sessions()
+    return [SessionListItem(**item) for item in items]
+
+
+@app.patch("/session/{session_id}/name")
+async def rename_session(session_id: str, request: RenameSessionRequest):
+    """Rename a saved session and persist the change."""
+    session = _get_session(session_id)
+    new_name = (request.name or "").strip()
+    if not new_name:
+        raise HTTPException(status_code=400, detail="Name must not be empty")
+
+    session["name"] = new_name
+    _persist_session_state(session_id, session)
+
+    updated = rename_persisted_session(session_id, new_name)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    return {"session_id": session_id, "name": new_name}
+
+
 def _truncate_text(text: str, limit: int = 1200) -> str:
     """Return a trimmed preview of longer text snippets."""
     if not text:
@@ -400,16 +646,23 @@ def _truncate_text(text: str, limit: int = 1200) -> str:
 
 
 def _build_voice_instructions(session_id: str, session: Dict[str, Any]) -> str:
-    """Create instructions for the realtime voice agent based on session context."""
+    """Create instructions for the realtime voice agent based on session context.
+
+    Prepends the same system-level coach persona used by the text agent to
+    keep behavior consistent across text and voice.
+    """
     questions: List[str] = session.get("questions") or []
     first_question = questions[0] if questions else "Tell me about yourself."
     question_bullets = "\n".join(f"- {q}" for q in questions[:5]) or "- Ask situational and behavioral questions tailored to the role."
     resume_excerpt = _truncate_text(session.get("resume_text", ""), 1500)
     job_desc_excerpt = _truncate_text(session.get("job_desc_text", ""), 1500)
 
-    instructions = f"""
-You are a realtime voice interview coach for session {session_id}.
+    base_prompt = get_base_coach_prompt()
 
+    instructions = f"""
+{base_prompt}
+
+# Realtime Voice Context (session {session_id}):
 Candidate resume excerpt:
 {resume_excerpt}
 
@@ -419,8 +672,9 @@ Job description excerpt:
 Interview question plan:
 {question_bullets}
 
-Conduct a conversational mock interview. Start with a brief greeting, then ask the first question exactly as "{first_question}". 
-Listen to the candidate's voice response. After they finish, provide concise, constructive feedback and practical tips (under 4 sentences). 
+# Realtime Guidance:
+Conduct a conversational mock interview. Start with a brief greeting, then ask the first question exactly as "{first_question}".
+Listen to the candidate's voice response. After they finish, provide concise, constructive feedback and practical tips (under 4 sentences).
 Proceed through the remaining questions naturally. If the candidate asks for clarification or coaching, offer targeted guidance.
 Keep responses under 30 seconds and always send a short text summary alongside audio so the UI can display the feedback.
 Wrap up when the candidate indicates they are done or when the planned questions are covered.
@@ -437,12 +691,31 @@ async def create_voice_session(request: VoiceSessionRequest):
     voice_name = request.voice or OPENAI_REALTIME_VOICE
     instructions = _build_voice_instructions(request.session_id, session)
 
-    payload = {
+    payload: Dict[str, Any] = {
         "model": OPENAI_REALTIME_MODEL,
         "modalities": ["audio", "text"],
         "voice": voice_name,
         "instructions": instructions,
     }
+
+    # Optional server-side VAD (turn detection) configuration
+    try:
+        td_mode = (OPENAI_TURN_DETECTION or "server_vad").strip().lower()
+        if td_mode == "none":
+            payload["turn_detection"] = {"type": "none"}
+        else:
+            threshold = float(OPENAI_TURN_THRESHOLD)
+            prefix_ms = int(OPENAI_TURN_PREFIX_MS)
+            silence_ms = int(OPENAI_TURN_SILENCE_MS)
+            payload["turn_detection"] = {
+                "type": "server_vad",
+                "threshold": threshold,
+                "prefix_padding_ms": prefix_ms,
+                "silence_duration_ms": silence_ms,
+            }
+    except Exception:
+        # If parsing fails, fall back silently without turn_detection overrides
+        logger.exception("Invalid VAD configuration; proceeding with service defaults")
 
     try:
         async with httpx.AsyncClient(timeout=10) as client:
@@ -506,6 +779,7 @@ async def start_agent(session_id: str):
             openai_model=OPENAI_MODEL,
             resume_text=session["resume_text"],
             job_description_text=session["job_desc_text"],
+            session_id=session_id,
         )
 
         # Start the agent

@@ -8,12 +8,16 @@ function createInitialVoiceState() {
         localStream: null,
         remoteStream: null,
         transcriptBuffer: '',
+        transcriptsByIndex: {},
+        messages: [],
+        streamingMessage: null,
     };
 }
 
 function createInitialState() {
     return {
         sessionId: null,
+        sessionName: null,
         questions: [],
         currentQuestionIndex: 0,
         answers: [],
@@ -36,9 +40,21 @@ const feedbackSection = document.getElementById('feedback-section');
 const exampleSection = document.getElementById('example-section');
 const summarySection = document.getElementById('summary-section');
 const interviewContainer = document.getElementById('interview-container');
+const sessionNameEl = document.getElementById('session-name');
+const questionPosEl = document.getElementById('question-position');
+const docsPanel = document.getElementById('docs-panel');
+const viewDocsBtn = document.getElementById('view-docs');
+const resumeDocEl = document.getElementById('resume-doc');
+const jobDocEl = document.getElementById('jobdoc-doc');
 const resumeActions = document.getElementById('resume-actions');
 const resumeSessionBtn = document.getElementById('resume-session');
 const clearSessionBtn = document.getElementById('clear-session');
+const sessionsSelect = document.getElementById('saved-sessions');
+const renameSessionBtn = document.getElementById('rename-session');
+const renameSessionInput = document.getElementById('rename-session-input');
+const sessionsCount = document.getElementById('sessions-count');
+const switchSessionsSelect = document.getElementById('switch-sessions');
+const switchSessionBtn = document.getElementById('switch-session');
 
 const uploadForm = document.getElementById('upload-form');
 const currentQuestion = document.getElementById('current-question');
@@ -55,6 +71,12 @@ const strengthsFeedback = document.getElementById('strengths-feedback');
 const improvementsFeedback = document.getElementById('improvements-feedback');
 const contentFeedback = document.getElementById('content-feedback');
 const toneFeedback = document.getElementById('tone-feedback');
+const feedbackUserTranscriptWrap = document.getElementById('feedback-user-transcript-wrap');
+const feedbackUserTranscript = document.getElementById('feedback-user-transcript');
+const feedbackCoachVoiceWrap = document.getElementById('feedback-coach-voice-wrap');
+const feedbackCoachVoice = document.getElementById('feedback-coach-voice');
+const feedbackTypedAnswerWrap = document.getElementById('feedback-typed-answer-wrap');
+const feedbackTypedAnswer = document.getElementById('feedback-typed-answer');
 const exampleAnswer = document.getElementById('example-answer');
 const exampleQuestion = document.getElementById('example-question');
 
@@ -109,19 +131,22 @@ function clearVoiceTranscript() {
     }
     if (state && state.voice) {
         state.voice.transcriptBuffer = '';
+        state.voice.streamingMessage = null;
+        state.voice.transcriptsByIndex = {};
+        state.voice.messages = [];
     }
     voiceTranscript.dataset.empty = 'true';
     voiceTranscript.innerHTML = '<p class="text-xs text-gray-500">Voice transcripts will appear here once the realtime session begins.</p>';
 }
 
-function appendVoiceMessage(role, message) {
+function appendVoiceMessage(role, message, options = {}) {
     if (!voiceTranscript || !message) {
-        return;
+        return null;
     }
 
     const text = message.trim();
     if (!text) {
-        return;
+        return null;
     }
 
     if (voiceTranscript.dataset.empty === 'true') {
@@ -152,8 +177,90 @@ function appendVoiceMessage(role, message) {
         wrapper.textContent = text;
     }
 
+    const entry = {
+        role,
+        text,
+        timestamp: new Date().toISOString(),
+        stream: !!options.stream,
+    };
+    let entryIndex = null;
+    if (state && state.voice && Array.isArray(state.voice.messages)) {
+        state.voice.messages.push(entry);
+        entryIndex = state.voice.messages.length - 1;
+    }
+
     voiceTranscript.appendChild(wrapper);
     voiceTranscript.scrollTop = voiceTranscript.scrollHeight;
+
+    return { wrapper, entry, entryIndex };
+}
+
+function appendAgentDelta(text) {
+    if (!text) {
+        return;
+    }
+
+    const cleanText = String(text).replace(/^\s+/g, '');
+    if (!cleanText) {
+        return;
+    }
+
+    if (!state.voice.streamingMessage || state.voice.streamingMessage.role !== 'agent') {
+        const result = appendVoiceMessage('agent', cleanText, { stream: true });
+        if (result) {
+            const contentEl = result.wrapper.querySelector('p');
+            state.voice.streamingMessage = {
+                role: 'agent',
+                element: contentEl,
+                entryIndex: result.entryIndex,
+                text: cleanText,
+            };
+        }
+    } else {
+        const stream = state.voice.streamingMessage;
+        stream.text += cleanText;
+        const updated = stream.text;
+        if (stream.element) {
+            stream.element.textContent = updated;
+        }
+        if (state.voice.messages[stream.entryIndex]) {
+            state.voice.messages[stream.entryIndex].text = updated;
+        }
+    }
+    state.voice.transcriptBuffer += cleanText;
+}
+
+function finalizeAgentMessage() {
+    const active = state.voice.streamingMessage;
+    const finalText = (active && active.text ? active.text : state.voice.transcriptBuffer).trim();
+
+    if (active && active.element) {
+        active.element.textContent = finalText;
+    }
+    if (active && state.voice.messages[active.entryIndex]) {
+        state.voice.messages[active.entryIndex].text = finalText;
+        state.voice.messages[active.entryIndex].stream = false;
+    }
+    if (!active && finalText) {
+        const result = appendVoiceMessage('agent', finalText);
+        if (result && state.voice.messages[result.entryIndex]) {
+            state.voice.messages[result.entryIndex].stream = false;
+        }
+    }
+
+    if (finalText) {
+        const idx = state.currentQuestionIndex;
+        if (Number.isInteger(idx) && state.sessionId) {
+            fetch(`/session/${state.sessionId}/voice-agent-text`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ question_index: idx, text: finalText })
+            }).catch(() => {});
+        }
+    }
+
+    state.voice.streamingMessage = null;
+    state.voice.transcriptBuffer = '';
 }
 
 function handleVoiceEvent(event) {
@@ -164,15 +271,61 @@ function handleVoiceEvent(event) {
     switch (event.type) {
         case 'response.output_text.delta': {
             const delta = event.delta || event.text || '';
-            state.voice.transcriptBuffer += delta;
+            appendAgentDelta(delta);
+            break;
+        }
+        case 'response.delta': {
+            const outputs = event.delta?.output || event.delta?.outputs || [];
+            if (Array.isArray(outputs)) {
+                outputs.forEach((item) => {
+                    if (!item) return;
+                    const type = item.type || item.kind || '';
+                    if (type === 'output_text.delta') {
+                        const text = item.text || item.content || item.content?.text || '';
+                        appendAgentDelta(text);
+                    } else if (type === 'output_text.done') {
+                        finalizeAgentMessage();
+                    } else if (type === 'output_audio_buffer' && Array.isArray(item.parts)) {
+                        item.parts.forEach((part) => {
+                            if (part && typeof part.transcript === 'string' && part.transcript.trim()) {
+                                appendAgentDelta(part.transcript);
+                                finalizeAgentMessage();
+                            }
+                        });
+                    }
+                });
+            }
+            break;
+        }
+        case 'response.content_part.added': {
+            const part = event.part || {};
+            if (part.type === 'audio' && typeof part.transcript === 'string') {
+                appendAgentDelta(part.transcript);
+            }
+            break;
+        }
+        case 'response.content_part.done': {
+            const part = event.part || {};
+            if (part.type === 'audio' && typeof part.transcript === 'string') {
+                appendAgentDelta(part.transcript);
+                finalizeAgentMessage();
+            }
+            break;
+        }
+        case 'output_audio_buffer.started': {
+            state.voice.transcriptBuffer = '';
+            state.voice.streamingMessage = null;
             break;
         }
         case 'response.output_text.done':
         case 'response.completed': {
-            if (state.voice.transcriptBuffer.trim()) {
-                appendVoiceMessage('agent', state.voice.transcriptBuffer.trim());
+            finalizeAgentMessage();
+            break;
+        }
+        case 'response.created': {
+            if (!state.voice.streamingMessage) {
+                appendAgentDelta('');
             }
-            state.voice.transcriptBuffer = '';
             break;
         }
         case 'response.error': {
@@ -187,6 +340,12 @@ function handleVoiceEvent(event) {
             const transcriptText = event.transcript || event.text || '';
             if (transcriptText) {
                 appendVoiceMessage('user', transcriptText);
+                // Capture transcript text for the current question index
+                const idx = state.currentQuestionIndex;
+                if (Number.isInteger(idx)) {
+                    const existing = state.voice.transcriptsByIndex[idx] || '';
+                    state.voice.transcriptsByIndex[idx] = existing ? `${existing}\n${transcriptText}` : transcriptText;
+                }
             }
             break;
         }
@@ -214,9 +373,8 @@ async function startVoiceInterview() {
 
     setVoiceControls(true);
     updateVoiceStatus('Connecting...', 'pending');
-    if (voiceTranscript && voiceTranscript.dataset.empty !== 'true') {
-        appendVoiceMessage('system', '--- Starting new voice session ---');
-    }
+    clearVoiceTranscript();
+    appendVoiceMessage('system', '--- Starting new voice session ---');
 
     try {
         const response = await fetch('/voice/session', {
@@ -525,7 +683,8 @@ document.addEventListener('DOMContentLoaded', () => {
     updateVoiceStatus('Offline', 'idle');
     setVoiceControls(false);
     setVoiceEnabled(false);
-    updateResumeControlsVisibility();
+    refreshSessionsList(state.sessionId);
+        refreshSwitcherList();
 });
 
 window.addEventListener('beforeunload', () => {
@@ -544,6 +703,13 @@ function setupEventListeners() {
         clearSessionBtn.addEventListener('click', async (event) => {
             event.preventDefault();
             await clearSavedSession();
+        });
+    }
+
+    if (renameSessionBtn) {
+        renameSessionBtn.addEventListener('click', async (event) => {
+            event.preventDefault();
+            await renameSelectedSession();
         });
     }
 
@@ -593,18 +759,189 @@ function setupEventListeners() {
     if (stopVoiceBtn) {
         stopVoiceBtn.addEventListener('click', () => stopVoiceInterview());
     }
+
+    if (switchSessionBtn) {
+        switchSessionBtn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            const id = switchSessionsSelect && switchSessionsSelect.value;
+            if (!id) return;
+            await resumeSavedSessionById(id);
+        });
+    }
+
+    if (viewDocsBtn) {
+        viewDocsBtn.addEventListener('click', toggleDocsPanel);
+    }
+}
+
+async function renameSelectedSession() {
+    const selectedId = sessionsSelect && sessionsSelect.value ? sessionsSelect.value : null;
+    if (!selectedId) {
+        alert('Select a session to rename.');
+        return;
+    }
+    const newName = (renameSessionInput && renameSessionInput.value || '').trim();
+    if (!newName) {
+        alert('Enter a new name for the session.');
+        return;
+    }
+    try {
+        const res = await fetch(`/session/${selectedId}/name`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: newName })
+        });
+        if (!res.ok) {
+            const detail = await res.text();
+            throw new Error(detail || 'Failed to rename session');
+        }
+        renameSessionInput.value = '';
+        await refreshSessionsList(selectedId);
+        await refreshSwitcherList();
+    } catch (err) {
+        console.error('Error renaming session:', err);
+        alert('Unable to rename session.');
+    }
+}
+
+async function refreshSessionsList(preselectId = null) {
+    if (!resumeActions || !sessionsSelect) {
+        return;
+    }
+    try {
+        const res = await fetch('/sessions');
+        if (!res.ok) {
+            throw new Error('Failed to load sessions');
+        }
+        const items = await res.json();
+        sessionsSelect.innerHTML = '';
+        if (Array.isArray(items) && items.length > 0) {
+            items.forEach(item => {
+                const opt = document.createElement('option');
+                opt.value = item.id;
+                opt.textContent = `${item.name || 'Session'}${item.questions_count ? ` • ${item.questions_count} q` : ''}`;
+                sessionsSelect.appendChild(opt);
+            });
+            const last = preselectId || localStorage.getItem('interviewSessionId');
+            if (last) {
+                sessionsSelect.value = last;
+            }
+            resumeActions.classList.remove('hidden');
+            if (sessionsCount) {
+                sessionsCount.textContent = `${items.length} saved`;
+            }
+        } else {
+            // Fallback: if we have a last-used session, fetch it and populate a single option
+            const last = localStorage.getItem('interviewSessionId');
+            if (last) {
+                try {
+                    const sres = await fetch(`/session/${last}`);
+                    if (sres.ok) {
+                        const sdata = await sres.json();
+                        const opt = document.createElement('option');
+                        opt.value = sdata.session_id || last;
+                        const display = sdata.name || `Session ${String(last).slice(0, 8)}`;
+                        opt.textContent = display;
+                        sessionsSelect.appendChild(opt);
+                        sessionsSelect.value = last;
+                        resumeActions.classList.remove('hidden');
+                        if (sessionsCount) {
+                            sessionsCount.textContent = `1 saved`;
+                        }
+                        return; // done
+                    }
+                } catch (e) {
+                    // ignore and hide panel below
+                }
+            }
+            resumeActions.classList.add('hidden');
+            if (sessionsCount) {
+                sessionsCount.textContent = '';
+            }
+        }
+    } catch (err) {
+        console.debug('No saved sessions found yet.');
+        resumeActions.classList.add('hidden');
+    }
 }
 
 function updateResumeControlsVisibility() {
     if (!resumeActions) {
         return;
     }
-    const savedId = localStorage.getItem('interviewSessionId');
-    resumeActions.classList.toggle('hidden', !savedId);
+    refreshSessionsList();
+    refreshSwitcherList();
 }
 
-async function resumeSavedSession() {
-    const savedSessionId = localStorage.getItem('interviewSessionId');
+// Populate the switcher in the interview header
+async function refreshSwitcherList() {
+    if (!switchSessionsSelect) return;
+    try {
+        const res = await fetch('/sessions');
+        if (!res.ok) throw new Error('Failed to load sessions');
+        const items = await res.json();
+        switchSessionsSelect.innerHTML = '';
+        if (Array.isArray(items) && items.length > 0) {
+            items.forEach(item => {
+                const opt = document.createElement('option');
+                opt.value = item.id;
+                opt.textContent = item.name || `Session ${String(item.id).slice(0,8)}`;
+                switchSessionsSelect.appendChild(opt);
+            });
+            if (state.sessionId) switchSessionsSelect.value = state.sessionId;
+        } else {
+            // Fallback to last-known or current
+            const last = localStorage.getItem('interviewSessionId');
+            const opt = document.createElement('option');
+            const val = last || state.sessionId;
+            if (val) {
+                opt.value = val;
+                opt.textContent = state.sessionName || `Session ${String(val).slice(0,8)}`;
+                switchSessionsSelect.appendChild(opt);
+            }
+        }
+    } catch (err) {
+        // Fallback: ensure current session appears
+        switchSessionsSelect.innerHTML = '';
+        if (state.sessionId) {
+            const opt = document.createElement('option');
+            opt.value = state.sessionId;
+            opt.textContent = state.sessionName || `Session ${String(state.sessionId).slice(0,8)}`;
+            switchSessionsSelect.appendChild(opt);
+        }
+    }
+}
+
+// Toggle and load resume/JD for the current session
+function toggleDocsPanel() {
+    if (!docsPanel || !state.sessionId) return;
+    const willShow = docsPanel.classList.contains('hidden');
+    if (willShow) {
+        // Show panel immediately with loading indicators
+        docsPanel.classList.remove('hidden');
+        if (resumeDocEl) resumeDocEl.textContent = 'Loading resume…';
+        if (jobDocEl) jobDocEl.textContent = 'Loading job description…';
+        fetch(`/session/${state.sessionId}/documents`)
+            .then(r => (r.ok ? r.json() : Promise.reject(new Error('Failed to load documents'))))
+            .then(data => {
+                if (resumeDocEl) resumeDocEl.textContent = data.resume_text || '';
+                if (jobDocEl) jobDocEl.textContent = data.job_desc_text || '';
+            })
+            .catch(err => {
+                console.error('Docs load error:', err);
+                if (resumeDocEl) resumeDocEl.textContent = 'Unable to load resume.';
+                if (jobDocEl) jobDocEl.textContent = 'Unable to load job description.';
+            });
+    } else {
+        docsPanel.classList.add('hidden');
+    }
+}
+
+async function resumeSavedSession(sessionIdOverride = null) {
+    const selectedId = sessionIdOverride
+        || (sessionsSelect && sessionsSelect.value)
+        || localStorage.getItem('interviewSessionId');
+    const savedSessionId = selectedId;
     if (!savedSessionId) {
         alert('No saved session was found.');
         updateResumeControlsVisibility();
@@ -634,9 +971,11 @@ async function resumeSavedSession() {
 
         state = createInitialState();
         state.sessionId = data.session_id;
+        state.sessionName = data.name || null;
         state.questions = data.questions || [];
         state.answers = data.answers || [];
         state.evaluations = data.evaluations || [];
+        localStorage.setItem('interviewSessionId', state.sessionId);
 
         const persistedIndex = typeof data.current_question_index === 'number'
             ? data.current_question_index
@@ -645,6 +984,10 @@ async function resumeSavedSession() {
         state.currentQuestionIndex = clampedIndex >= state.questions.length && state.questions.length > 0
             ? state.questions.length - 1
             : clampedIndex;
+
+        if (sessionNameEl) {
+            sessionNameEl.textContent = state.sessionName || `Session ${String(state.sessionId).slice(0, 8)}`;
+        }
 
         if (loadingSection) {
             loadingSection.classList.add('hidden');
@@ -667,7 +1010,8 @@ async function resumeSavedSession() {
             feedbackSection.classList.add('hidden');
             exampleSection.classList.add('hidden');
             summarySection.classList.add('hidden');
-            updateResumeControlsVisibility();
+            refreshSessionsList(state.sessionId);
+            refreshSwitcherList();
             return;
         }
 
@@ -695,20 +1039,28 @@ async function resumeSavedSession() {
     }
 }
 
+async function resumeSavedSessionById(sessionId) {
+    if (!sessionId) {
+        return;
+    }
+    await resumeSavedSession(sessionId);
+}
+
+
 async function clearSavedSession() {
-    const savedSessionId = localStorage.getItem('interviewSessionId');
-    if (!savedSessionId) {
+    const selectedId = sessionsSelect && sessionsSelect.value ? sessionsSelect.value : localStorage.getItem('interviewSessionId');
+    if (!selectedId) {
         updateResumeControlsVisibility();
         return;
     }
 
-    const confirmed = window.confirm('This will permanently remove your saved session. Continue?');
+    const confirmed = window.confirm('This will permanently remove the selected session. Continue?');
     if (!confirmed) {
         return;
     }
 
     try {
-        const response = await fetch(`/session/${savedSessionId}`, { method: 'DELETE' });
+        const response = await fetch(`/session/${selectedId}`, { method: 'DELETE' });
         if (!response.ok && response.status !== 404) {
             throw new Error('Failed to delete saved session');
         }
@@ -718,9 +1070,11 @@ async function clearSavedSession() {
         return;
     }
 
-    localStorage.removeItem('interviewSessionId');
+    if (localStorage.getItem('interviewSessionId') === selectedId) {
+        localStorage.removeItem('interviewSessionId');
+    }
     updateResumeControlsVisibility();
-    if (state.sessionId === savedSessionId) {
+    if (state.sessionId === selectedId) {
         handleRestartInterview();
     }
 }
@@ -820,6 +1174,7 @@ async function generateQuestions() {
         setVoiceEnabled(true);
         updateVoiceStatus('Ready for voice coaching', 'idle');
         clearVoiceTranscript();
+        updateQuestionPosition();
         
     } catch (error) {
         console.error('Error generating questions:', error);
@@ -834,11 +1189,27 @@ function displayQuestion(index) {
         return;
     }
     
+    // Persist transcript for previous index if captured
+    try {
+        const prevIdx = state.currentQuestionIndex;
+        if (Number.isInteger(prevIdx)) {
+            const t = state.voice.transcriptsByIndex[prevIdx];
+            if (t && state.sessionId) {
+                fetch(`/session/${state.sessionId}/voice-transcript`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ question_index: prevIdx, text: t })
+                }).catch(() => {});
+            }
+        }
+    } catch (_) {}
+
     state.currentQuestionIndex = index;
     const question = state.questions[index];
     
     currentQuestion.textContent = question;
     answerInput.value = '';
+    updateQuestionPosition();
     
     if (interviewContainer) {
         interviewContainer.classList.remove('hidden');
@@ -848,6 +1219,17 @@ function displayQuestion(index) {
     if (exampleQuestion) {
         exampleQuestion.textContent = '';
         exampleQuestion.classList.add('hidden');
+    }
+    refreshSwitcherList();
+}
+
+function updateQuestionPosition() {
+    if (!questionPosEl) return;
+    const total = state.questions.length || 0;
+    const currentOneBased = Math.min(total, (state.currentQuestionIndex || 0) + 1);
+    questionPosEl.textContent = total > 0 ? `${currentOneBased} of ${total}` : '–';
+    if (sessionNameEl) {
+        sessionNameEl.textContent = state.sessionName || (state.sessionId ? `Session ${String(state.sessionId).slice(0,8)}` : '');
     }
 }
 
@@ -888,7 +1270,10 @@ async function handleAnswerSubmission() {
             body: JSON.stringify({
                 session_id: state.sessionId,
                 question,
-                answer
+                answer,
+                voice_transcript: state.voice && Number.isInteger(state.currentQuestionIndex)
+                    ? (state.voice.transcriptsByIndex[state.currentQuestionIndex] || '')
+                    : ''
             })
         });
         
@@ -941,16 +1326,62 @@ function displayFeedback(evaluation) {
     }
     
     // Format weaknesses/improvements (handling both string and array formats)
+    let improv = [];
     if (Array.isArray(evaluation.weaknesses)) {
-        improvementsFeedback.textContent = evaluation.weaknesses.join(', ');
-    } else {
-        improvementsFeedback.textContent = evaluation.weaknesses || 'No specific improvements suggested.';
+        improv = evaluation.weaknesses;
+    } else if (evaluation.weaknesses) {
+        improv = [evaluation.weaknesses];
+    } else if (Array.isArray(evaluation.improvements)) {
+        improv = evaluation.improvements;
+    } else if (evaluation.improvements) {
+        improv = [evaluation.improvements];
     }
+    improvementsFeedback.textContent = improv.length ? improv.join(', ') : 'No specific improvements suggested.';
     
     // Set content and tone feedback from the detailed feedback field
     contentFeedback.textContent = evaluation.feedback || 'No content feedback available.';
     toneFeedback.textContent = evaluation.example_improvement || 'No tone feedback available.';
     
+    // Parity extras for voice/typed
+    try {
+        // Show typed answer
+        const last = state.answers[state.answers.length - 1];
+        if (last && last.answer) {
+            if (feedbackTypedAnswerWrap) feedbackTypedAnswerWrap.classList.remove('hidden');
+            if (feedbackTypedAnswer) feedbackTypedAnswer.textContent = last.answer;
+        } else if (feedbackTypedAnswerWrap) {
+            feedbackTypedAnswerWrap.classList.add('hidden');
+        }
+
+        // Fetch transcript + coach text for current index
+        const idx = state.currentQuestionIndex;
+        if (state.sessionId) {
+            fetch(`/session/${state.sessionId}`)
+                .then(r => (r.ok ? r.json() : Promise.reject()))
+                .then(data => {
+                    const vt = (data.voice_transcripts && (data.voice_transcripts[String(idx)] || data.voice_transcripts[idx])) || '';
+                    if (vt) {
+                        if (feedbackUserTranscriptWrap) feedbackUserTranscriptWrap.classList.remove('hidden');
+                        if (feedbackUserTranscript) feedbackUserTranscript.textContent = vt;
+                    } else if (feedbackUserTranscriptWrap) {
+                        feedbackUserTranscriptWrap.classList.add('hidden');
+                    }
+
+                    const coach = (data.voice_agent_text && (data.voice_agent_text[String(idx)] || data.voice_agent_text[idx])) || '';
+                    if (coach) {
+                        if (feedbackCoachVoiceWrap) feedbackCoachVoiceWrap.classList.remove('hidden');
+                        if (feedbackCoachVoice) feedbackCoachVoice.textContent = coach;
+                    } else if (feedbackCoachVoiceWrap) {
+                        feedbackCoachVoiceWrap.classList.add('hidden');
+                    }
+                })
+                .catch(() => {
+                    if (feedbackUserTranscriptWrap) feedbackUserTranscriptWrap.classList.add('hidden');
+                    if (feedbackCoachVoiceWrap) feedbackCoachVoiceWrap.classList.add('hidden');
+                });
+        }
+    } catch (_) {}
+
     // Show feedback section
     feedbackSection.classList.remove('hidden');
     
@@ -1030,6 +1461,7 @@ function displayExampleAnswer(answer) {
     const htmlContent = converter.makeHtml(formattedAnswer);
     
     exampleAnswer.innerHTML = htmlContent;
+    updateQuestionPosition();
 }
 
 // Handle getting example answer
@@ -1084,6 +1516,19 @@ function handleNextQuestion() {
 
 // Display interview summary
 function displaySummary() {
+    // Persist transcript for current question if any
+    try {
+        const currIdx = state.currentQuestionIndex;
+        const t = state.voice.transcriptsByIndex[currIdx];
+        if (t && state.sessionId) {
+            fetch(`/session/${state.sessionId}/voice-transcript`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ question_index: currIdx, text: t })
+            }).catch(() => {});
+        }
+    } catch (_) {}
+
     // Hide other sections
     if (interviewContainer) {
         interviewContainer.classList.add('hidden');
@@ -1144,6 +1589,102 @@ function displaySummary() {
     
     // Show summary section
     summarySection.classList.remove('hidden');
+    updateQuestionPosition();
+    buildPerQuestionCards();
+}
+
+function buildPerQuestionCards() {
+    const cardsHost = document.getElementById('per-question-cards');
+    if (!cardsHost || !state.sessionId) return;
+    cardsHost.innerHTML = '';
+
+    fetch(`/session/${state.sessionId}`)
+        .then(r => (r.ok ? r.json() : Promise.reject(new Error('Failed to load session details'))))
+        .then(data => {
+            const questions = data.questions || [];
+            const evals = (data.per_question && data.per_question.length) ? data.per_question : (data.evaluations || []);
+            const transcripts = data.voice_transcripts || {};
+            const coachTexts = data.voice_agent_text || {};
+            cardsHost.innerHTML = '';
+
+            questions.forEach((q, i) => {
+                const ev = evals[i] || {};
+                const score = typeof ev.score === 'number' ? ev.score : '';
+                const strengths = Array.isArray(ev.strengths) ? ev.strengths : (ev.strengths ? [ev.strengths] : []);
+                const weaknesses = Array.isArray(ev.weaknesses) ? ev.weaknesses : (ev.weaknesses ? [ev.weaknesses] : []);
+                const why = ev.why_asked || '';
+                const example = ev.example_improvement || '';
+                const t = transcripts[String(i)] || '';
+
+                const card = document.createElement('div');
+                card.className = 'p-4 border border-gray-200 rounded-lg bg-white';
+
+                const header = document.createElement('div');
+                header.className = 'flex items-center justify-between mb-2';
+                header.innerHTML = `<div class="font-medium text-gray-900">Q${i + 1}: ${escapeHtml(q)}</div><div class="text-sm text-indigo-700 font-semibold">${score !== '' ? `${score}/10` : ''}</div>`;
+                card.appendChild(header);
+
+                if (why) {
+                    const whyEl = document.createElement('p');
+                    whyEl.className = 'text-sm text-gray-600 mb-2';
+                    whyEl.textContent = `Why asked: ${why}`;
+                    card.appendChild(whyEl);
+                }
+
+                if (strengths.length) {
+                    const s = document.createElement('div');
+                    s.className = 'mb-2';
+                    s.innerHTML = '<div class="text-sm font-medium text-green-700 mb-1">What went well</div>' +
+                        '<ul class="list-disc list-inside text-sm text-gray-800">' + strengths.map(escapeHtml).map(x => `<li>${x}</li>`).join('') + '</ul>';
+                    card.appendChild(s);
+                }
+
+                if (weaknesses.length) {
+                    const w = document.createElement('div');
+                    w.className = 'mb-2';
+                    w.innerHTML = '<div class="text-sm font-medium text-amber-700 mb-1">What to improve</div>' +
+                        '<ul class="list-disc list-inside text-sm text-gray-800">' + weaknesses.map(escapeHtml).map(x => `<li>${x}</li>`).join('') + '</ul>';
+                    card.appendChild(w);
+                }
+
+                if (example) {
+                    const ex = document.createElement('details');
+                    ex.className = 'mb-2';
+                    ex.innerHTML = `<summary class="cursor-pointer text-sm text-gray-700">Example improvement</summary><div class="mt-2 text-sm text-gray-800 whitespace-pre-wrap">${escapeHtml(example)}</div>`;
+                    card.appendChild(ex);
+                }
+
+                if (t) {
+                    const tr = document.createElement('details');
+                    tr.className = 'mb-1';
+                    tr.innerHTML = `<summary class="cursor-pointer text-sm text-gray-700">View full transcript</summary><pre class="mt-2 whitespace-pre-wrap text-sm text-gray-800">${escapeHtml(t)}</pre>`;
+                    card.appendChild(tr);
+                }
+
+                const coach = coachTexts[String(i)] || '';
+                if (coach) {
+                    const cf = document.createElement('details');
+                    cf.className = 'mb-1';
+                    cf.innerHTML = `<summary class="cursor-pointer text-sm text-gray-700">Coach feedback (voice)</summary><pre class="mt-2 whitespace-pre-wrap text-sm text-gray-800">${escapeHtml(coach)}</pre>`;
+                    card.appendChild(cf);
+                }
+
+                cardsHost.appendChild(card);
+            });
+        })
+        .catch(err => {
+            console.debug('Per-question cards unavailable:', err);
+        });
+}
+
+function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/\"/g, '&quot;')
+        .replace(/'/g, '&#039;');
 }
 
 // Handle restarting interview
