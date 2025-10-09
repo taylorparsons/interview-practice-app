@@ -66,33 +66,23 @@ cd interview-practice-app
 chmod +x run.sh run_voice.sh test.sh kill.sh
 ```
 
-2. Create and Activate Virtual Environment
-```bash
-python3 -m venv venv
-source venv/bin/activate
-```
-
-3. Install Dependencies
-```bash
-pip install -r requirements.txt
-```
-
-4. Set Up Environment Variables
+2. Configure Environment Variables
 Copy `.env.example` to `.env`, then add your OpenAI API key:
 ```bash
 cp .env.example .env
 ```
 Update `.env` with your token (and override realtime model/voice if desired).
 
-5. Run the Application
+3. Run the Application
 ```bash
 ./run.sh
 ```
-The script creates a virtual environment (if missing), installs requirements, and starts the development server with auto-reload by default.
+The script creates/activates the virtual environment (if missing), installs dependencies, and starts the development server with auto-reload by default. Use `./run_voice.sh` when you want to skip evaluation and jump straight into the realtime coaching flow.
 When the UI loads, upload your resume and either attach a job description file or paste its text directly into the job description field.
 
 ## Helper Scripts
 - `./run.sh`: Boots the FastAPI server. Add `--no-reload` to disable auto-reload or `--python 3.11` to select a Python version.
+- `./run_voice.sh`: Same as `run.sh`, but prints realtime voice config details; handy when testing the WebRTC/audio flow exclusively.
 - `./test.sh`: Runs the test suite with `pytest -q`. Use `--health` to ping the running server (`http://localhost:8000` by default) after tests, or override the health-check target with `--url <base_url>`.
 
 ## Realtime Voice Interviews
