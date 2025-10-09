@@ -118,9 +118,8 @@ When the UI loads, upload your resume and either attach a job description file o
 Distributed under the MIT License. See `LICENSE` for more information.
 
 ## Contact
-Taylor Parsons - taylor.parsons@example.com
+Taylor Parsons - taylor.parsons@gmaio.com
 
-Project Link: [https://github.com/yourusername/interview-practice-app](https://github.com/yourusername/interview-practice-app)
 
 ---
 
