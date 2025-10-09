@@ -42,9 +42,8 @@ if [[ "$DO_HEALTH" -eq 1 ]]; then
   STATUS=$?
   set -e
   if [[ $STATUS -ne 0 ]]; then
-    echo "Health check failed. Is the server running? Try: ./run.sh" >&2
+    echo "Health check failed. Is the server running? Try: ./run_voice.sh" >&2
     exit 1
   fi
   echo "Health check passed."
 fi
-

@@ -63,7 +63,7 @@ State is mirrored between the in-memory cache, JSON files under `app/session_sto
 ```bash
 git clone https://github.com/yourusername/interview-practice-app.git
 cd interview-practice-app
-chmod +x run.sh run_voice.sh test.sh kill.sh
+chmod +x run_voice.sh test.sh kill.sh
 ```
 
 2. Configure Environment Variables
@@ -75,14 +75,13 @@ Update `.env` with your token (and override realtime model/voice if desired).
 
 3. Run the Application
 ```bash
-./run.sh
+./run_voice.sh
 ```
-The script creates/activates the virtual environment (if missing), installs dependencies, and starts the development server with auto-reload by default. Use `./run_voice.sh` when you want to skip evaluation and jump straight into the realtime coaching flow.
+The script creates/activates the virtual environment (if missing), installs dependencies, confirms realtime voice defaults, and starts the development server with auto-reload by default.
 When the UI loads, upload your resume and either attach a job description file or paste its text directly into the job description field.
 
 ## Helper Scripts
-- `./run.sh`: Boots the FastAPI server. Add `--no-reload` to disable auto-reload or `--python 3.11` to select a Python version.
-- `./run_voice.sh`: Same as `run.sh`, but prints realtime voice config details; handy when testing the WebRTC/audio flow exclusively.
+- `./run_voice.sh`: Boots the FastAPI server with realtime voice defaults. Add `--no-reload` to disable auto-reload or `--python 3.11` to prefer a specific Python version.
 - `./test.sh`: Runs the test suite with `pytest -q`. Use `--health` to ping the running server (`http://localhost:8000` by default) after tests, or override the health-check target with `--url <base_url>`.
 
 ## Realtime Voice Interviews

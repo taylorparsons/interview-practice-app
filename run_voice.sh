@@ -4,6 +4,53 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$PROJECT_ROOT"
 
+# Script options (overridable via CLI flags)
+REQUESTED_PYVER=""
+RELOAD="${RELOAD:-1}"
+
+usage() {
+  cat <<'EOF'
+Usage: ./run_voice.sh [options]
+
+Options:
+  --python <version>   Prefer a specific python version (e.g. 3.11)
+  --no-reload          Start uvicorn without the auto-reload watcher
+  -h, --help           Show this help message and exit
+
+Environment overrides:
+  PYTHON_BIN=<path>    Use a specific python interpreter
+  HOST, PORT           Server bind address (default 0.0.0.0:8000)
+  RELOAD=0             Disable auto-reload (same as --no-reload)
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --python)
+      if [[ $# -lt 2 ]]; then
+        echo "Error: --python requires an argument like 3.11" >&2
+        usage
+        exit 1
+      fi
+      REQUESTED_PYVER="$2"
+      shift 2
+      ;;
+    --no-reload)
+      RELOAD=0
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      usage
+      exit 1
+      ;;
+  esac
+done
+
 # Load environment configuration early so we can validate voice settings.
 set -a
 if [[ -f .env ]]; then
@@ -29,6 +76,9 @@ export OPENAI_REALTIME_URL="${OPENAI_REALTIME_URL:-https://api.openai.com/v1/rea
 declare -a PYTHON_CANDIDATES=()
 if [[ -n "${PYTHON_BIN:-}" ]]; then
   PYTHON_CANDIDATES+=("$PYTHON_BIN")
+fi
+if [[ -n "$REQUESTED_PYVER" ]]; then
+  PYTHON_CANDIDATES+=("python${REQUESTED_PYVER}")
 fi
 PYTHON_CANDIDATES+=("python3.11" "python3.12" "python3.10" "python3")
 
@@ -90,8 +140,7 @@ fi
 HOST="${HOST:-0.0.0.0}"
 PORT="${PORT:-8000}"
 RELOAD_FLAG="--reload"
-
-if [[ "${RELOAD:-1}" == "0" ]]; then
+if [[ "$RELOAD" == "0" ]]; then
   RELOAD_FLAG=""
 fi
 
