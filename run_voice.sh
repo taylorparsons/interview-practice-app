@@ -25,19 +25,66 @@ export OPENAI_REALTIME_MODEL="${OPENAI_REALTIME_MODEL:-gpt-realtime-mini-2025-10
 export OPENAI_REALTIME_VOICE="${OPENAI_REALTIME_VOICE:-verse}"
 export OPENAI_REALTIME_URL="${OPENAI_REALTIME_URL:-https://api.openai.com/v1/realtime}"
 
+# Select a Python interpreter that is known to satisfy binary wheel availability.
+declare -a PYTHON_CANDIDATES=()
+if [[ -n "${PYTHON_BIN:-}" ]]; then
+  PYTHON_CANDIDATES+=("$PYTHON_BIN")
+fi
+PYTHON_CANDIDATES+=("python3.11" "python3.12" "python3.10" "python3")
+
+PYTHON_BIN=""
+for candidate in "${PYTHON_CANDIDATES[@]}"; do
+  if command -v "$candidate" >/dev/null 2>&1; then
+    version=$("$candidate" -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
+    major=${version%%.*}
+    minor=${version#*.}
+    if [[ "$major" -eq 3 && "$minor" -lt 13 ]]; then
+      PYTHON_BIN="$candidate"
+      break
+    fi
+  fi
+done
+
+if [[ -z "$PYTHON_BIN" ]]; then
+  cat <<'EOF' >&2
+Error: Could not find a supported Python interpreter (<3.13).
+Install Python 3.11 or 3.12 and re-run, or set PYTHON_BIN to a compatible executable.
+EOF
+  exit 1
+fi
+
 # Create a virtual environment when missing.
 if [[ ! -d venv ]]; then
-  echo "Creating virtual environment..."
-  python3 -m venv venv
+  echo "Creating virtual environment with ${PYTHON_BIN}..."
+  "$PYTHON_BIN" -m venv venv
+fi
+
+if [[ ! -x venv/bin/python ]]; then
+  echo "Error: venv/bin/python is missing. Remove venv/ and re-run the script." >&2
+  exit 1
+fi
+
+VENV_VERSION=$(venv/bin/python -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
+VENV_MAJOR=${VENV_VERSION%%.*}
+VENV_MINOR=${VENV_VERSION#*.}
+if [[ "$VENV_MAJOR" -eq 3 && "$VENV_MINOR" -ge 13 ]]; then
+  cat <<'EOF' >&2
+Error: Existing virtual environment uses Python 3.13+, which is not yet supported by scikit-learn.
+Remove the venv/ directory (rm -rf venv) and rerun this script to build with Python 3.11 or 3.12.
+EOF
+  exit 1
 fi
 
 # Activate the environment and refresh dependencies (idempotent when already installed).
 # shellcheck disable=SC1091
 source venv/bin/activate
 
+echo "Ensuring pip is up to date..."
+python -m pip install --upgrade pip >/dev/null
+
 if [[ -f requirements.txt ]]; then
   echo "Installing project requirements..."
-  pip install -r requirements.txt >/dev/null
+  python -m pip install -r requirements.txt >/dev/null
 fi
 
 HOST="${HOST:-0.0.0.0}"

@@ -36,6 +36,7 @@ logs/
 # OpenAI and sensitive config
 .openai_config
 config.py
+!app/config.py
 
 # Persisted sessions
 app/session_store/
