@@ -32,8 +32,8 @@ if ! command -v pytest >/dev/null 2>&1; then
   pip install pytest >/dev/null
 fi
 
-echo "Running tests..."
-pytest -q || { echo "Tests failed" >&2; exit 1; }
+echo "Running tests with verbose output..."
+pytest -vv --maxfail=1 --durations=5 || { echo "Tests failed" >&2; exit 1; }
 
 if [[ "$DO_HEALTH" -eq 1 ]]; then
   echo "Health check: ${BASE_URL}/"

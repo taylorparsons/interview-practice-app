@@ -15,3 +15,6 @@ PyPDF2==2.10.0
 scikit-learn==1.4.2
 nltk==3.7
 python-docx==0.8.11
+
+# Testing
+pytest>=7.4.0

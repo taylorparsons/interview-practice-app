@@ -156,6 +156,46 @@ Outcome: Structured artifact for deliberate practice.
 
 ---
 
+## Technical Design Updates (MVP)
+
+### MVP 1 — Dual-Sided Voice Transcripts
+- **Existing**: The realtime pipeline only persists coach utterances returned from OpenAI, writing them into session JSON via the `InterviewPracticeAgent`. Candidate speech streams directly to OpenAI with no transcription callback.
+- **Additions**: Extend the WebRTC client to fork the outbound audio into an on-device transcription task (OpenAI Realtime `input_audio_transcription=true`) and emit interim/final text packets over the existing websocket channel. FastAPI handlers append `{role, text, timestamp, stream_state}` objects to `voice_messages`, mirroring coach entries. The timeline UI listens for `candidate_transcript` events and renders them without waiting for session save to avoid UI lag.
+- **Rationale**: Keeping transcription in the same realtime session avoids new third-party services, minimizes latency (<150 ms target), and lets us reuse the existing session persistence codepath with only additive schema fields.
+- **Acceptance**: GIVEN a voice practice session is in progress with a connected microphone WHEN the candidate speaks THEN the timeline shows their transcript alongside the coach within 150 ms and the session JSON stores the utterance with role `candidate`.
+
+### MVP 2 — Coach Formatting Preservation
+- **Existing**: Coach feedback is flattened to plain paragraphs before storage/rendering, dropping Markdown structure provided by the model.
+- **Additions**: Allow the agent to emit Markdown-formatted guidance, store it verbatim in `voice_messages`, and render it with a shared Markdown → sanitized HTML renderer (python-markdown + bleach). Timeline cards and exports will consume the sanitized HTML while keeping the raw Markdown in session JSON for reuse.
+- **Rationale**: Markdown balances expressiveness and safety, keeps storage compact, and aligns with how typed feedback is already generated, reducing incremental complexity.
+- **Acceptance**: GIVEN the coach sends Markdown-formatted feedback (e.g., bullet lists) WHEN the UI renders the message or an export is generated THEN the visible output preserves list structure while the stored session data retains the original Markdown text.
+
+### MVP 3 — Practice Again for Voice/Text Sessions
+- **Existing**: Practice Again leverages a text-only flow that clones question lists but lives outside the voice session state machine.
+- **Additions**: Introduce `practice_history` entries recording `{completed_at, question_ids, model_id, voice_id}` per run. Add `POST /sessions/{id}/practice-again` that snapshots the current template, optionally merges user-supplied questions, clears answer/transcript fields, and persists a new run ID. Frontend updates the summary screen with a modal fed by this endpoint.
+- **Rationale**: Persisting run metadata keeps the implementation additive (no destructive migrations) and enables future analytics on reuse while ensuring voice and text share the same reset semantics.
+- **Acceptance**: GIVEN a session where all questions are completed WHEN the user chooses Practice Again with either reuse or add-questions THEN the system creates a new run with cleared answers/transcripts, records the prior run in `practice_history`, and surfaces the first question of the new run.
+
+### MVP 4 — Runtime Model Selection
+- **Existing**: The agent reads a global `settings.py` constant for model choice; effort/verbosity are hard-coded heuristics.
+- **Additions**: Add `voice_settings.model_id`, `thinking_effort`, and `verbosity` to session state with defaults (`gpt-4o-mini`, `medium`, `balanced`). Expose `PATCH /sessions/{id}/settings` validating against the approved model matrix. The InterviewPracticeAgent watches for changes and applies them to the next outgoing prompt (no retroactive re-processing) by updating the realtime session parameters. UI includes a settings drawer that persists selection and shows a toast noting “applies to upcoming questions.”
+- **Rationale**: A session-scoped settings document keeps behavior predictable across reconnects and maintains isolation between concurrent sessions, while deferring application until the next prompt avoids mid-stream transcript mismatches.
+- **Acceptance**: GIVEN a session is active and the user selects a new model/effort/verbosity combination WHEN they save the change THEN the selection persists to `voice_settings`, a confirmation appears stating the change affects upcoming questions, and the next prompt uses the new configuration while previous transcripts remain unchanged.
+
+### MVP 5 — Voice Selection with Preview
+- **Existing**: Voice ID is fixed in config and shared across users.
+- **Additions**: Define a catalog (`voice_catalog.json`) storing voice IDs, labels, and preview URLs. Serve it via `GET /voices`. Session settings persist the chosen `voice_id`; the realtime agent includes it on stream creation. Frontend fetches the catalog, caches short preview clips locally, and plays them via the `<audio>` element before committing changes.
+- **Rationale**: Centralizing voice metadata keeps configuration server-driven while limiting client logic to presentation. Short previews avoid hitting the realtime API during selection and create a more responsive UX.
+- **Acceptance**: GIVEN the user opens the voice selector WHEN they preview a voice and confirm their choice THEN the preview plays locally without affecting the active session, and subsequent prompts use the newly selected `voice_id` stored in `voice_settings`.
+
+### MVP 6 — PDF Study Guide Export
+- **Existing**: No export path; the server only serves HTML/timeline responses.
+- **Additions**: Implement `POST /sessions/{id}/exports/pdf` that enqueues a FastAPI `BackgroundTasks` job to render a Jinja2 template into HTML, pipe it through WeasyPrint, and stream the resulting PDF to the user while caching metadata in `pdf_exports`. Temporary files live under `app/uploads/tmp` and are cleaned after download. Timeline data, transcripts, and takeaways are injected via the same serializer used for the web UI to guarantee parity.
+- **Rationale**: Using WeasyPrint keeps the stack pure-Python, avoiding external services and satisfying the privacy constraint. BackgroundTasks prevents blocking the main request while staying simpler than introducing a new worker process for the MVP.
+- **Acceptance**: GIVEN a completed session with transcripts and evaluations WHEN the user requests an export THEN the API responds within 5 seconds with a downloadable PDF that includes questions, candidate/coach messages, feedback, and takeaways, and `pdf_exports` logs the generated artifact.
+
+---
+
 ## Data Requirements
 
 ### Session Schema Additions

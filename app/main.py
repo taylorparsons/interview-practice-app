@@ -57,14 +57,26 @@ def _get_session(session_id: str) -> Dict[str, Any]:
     """Retrieve a session from memory or disk, raising 404 when missing."""
     session = active_sessions.get(session_id)
     if session is not None:
-        return session
+        return _ensure_session_defaults(session)
 
     stored = load_persisted_session(session_id)
     if stored is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    active_sessions[session_id] = stored
-    return stored
+    session = _ensure_session_defaults(stored)
+    active_sessions[session_id] = session
+    return session
+
+
+def _ensure_session_defaults(session: Dict[str, Any]) -> Dict[str, Any]:
+    """Populate expected session collections when missing."""
+    if "voice_transcripts" not in session or session["voice_transcripts"] is None:
+        session["voice_transcripts"] = {}
+    if "voice_agent_text" not in session or session["voice_agent_text"] is None:
+        session["voice_agent_text"] = {}
+    if "voice_messages" not in session or session["voice_messages"] is None:
+        session["voice_messages"] = []
+    return session
 
 
 def _persist_session_state(session_id: str, session: Dict[str, Any]) -> None:
@@ -215,6 +227,14 @@ class SaveAgentTextRequest(BaseModel):
     text: str
 
 
+class VoiceMessagePayload(BaseModel):
+    role: str
+    text: str
+    timestamp: Optional[str] = None
+    stream: Optional[bool] = False
+    question_index: Optional[int] = None
+
+
 # Routes
 @app.get("/", response_class=HTMLResponse)
 async def get_index(request: Request):
@@ -275,6 +295,9 @@ async def upload_documents(
         "current_question_index": 0,
         "created_at": datetime.utcnow().isoformat() + "Z",
         "updated_at": datetime.utcnow().isoformat() + "Z",
+        "voice_transcripts": {},
+        "voice_agent_text": {},
+        "voice_messages": [],
     }
 
     _persist_session_state(session_id, session_data)
@@ -557,6 +580,7 @@ async def get_session_status(session_id: str):
         "voice_transcripts": session.get("voice_transcripts", {}),
         "per_question": session.get("per_question", []),
         "voice_agent_text": session.get("voice_agent_text", {}),
+        "voice_messages": session.get("voice_messages", []),
     }
 
 
@@ -592,6 +616,78 @@ async def save_voice_agent_text(session_id: str, payload: SaveAgentTextRequest):
     session["voice_agent_text"] = vat
     _persist_session_state(session_id, session)
     return {"ok": True}
+
+
+@app.post("/session/{session_id}/voice-messages")
+async def append_voice_message(session_id: str, payload: VoiceMessagePayload):
+    """Append a realtime voice message (candidate or coach) to session history."""
+    session = _get_session(session_id)
+
+    text = (payload.text or "").strip()
+    if not text:
+        return {"ok": False, "reason": "empty_text"}
+
+    role_raw = (payload.role or "system").strip().lower()
+    role_map = {
+        "user": "candidate",
+        "candidate": "candidate",
+        "coach": "coach",
+        "assistant": "coach",
+        "agent": "coach",
+        "system": "system",
+    }
+    normalized_role = role_map.get(role_raw, role_raw or "system")
+
+    entry: Dict[str, Any] = {
+        "role": normalized_role,
+        "text": text,
+        "timestamp": payload.timestamp or datetime.utcnow().isoformat() + "Z",
+    }
+    if payload.stream is not None:
+        entry["stream"] = bool(payload.stream)
+    if payload.question_index is not None:
+        entry["question_index"] = payload.question_index
+
+    messages = session.get("voice_messages") or []
+    messages.append(entry)
+    session["voice_messages"] = messages
+
+    q_index = payload.question_index
+    if q_index is not None:
+        key = str(q_index)
+        if normalized_role == "candidate":
+            vt = session.get("voice_transcripts") or {}
+            existing = (vt.get(key) or "").strip()
+            vt[key] = f"{existing}\n{text}".strip() if existing else text
+            session["voice_transcripts"] = vt
+        elif normalized_role == "coach":
+            vat = session.get("voice_agent_text") or {}
+            existing = (vat.get(key) or "").strip()
+            vat[key] = f"{existing}\n{text}".strip() if existing else text
+            session["voice_agent_text"] = vat
+
+    _persist_session_state(session_id, session)
+    candidate_count = sum(1 for m in messages if m.get("role") == "candidate")
+    coach_count = sum(1 for m in messages if m.get("role") == "coach")
+    completeness = bool(candidate_count and coach_count)
+    logger.info(
+        "voice.transcript.metric: session=%s role=%s idx=%s total=%s candidate_count=%s coach_count=%s complete=%s",
+        session_id,
+        normalized_role,
+        q_index,
+        len(messages),
+        candidate_count,
+        coach_count,
+        completeness,
+    )
+    logger.debug(
+        "voice.message.appended: session=%s role=%s idx=%s total=%s",
+        session_id,
+        normalized_role,
+        q_index,
+        len(messages),
+    )
+    return {"ok": True, "index": len(messages) - 1}
 
 
 @app.delete("/session/{session_id}")

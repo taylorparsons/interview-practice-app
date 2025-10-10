@@ -30,6 +30,9 @@ def load_session(session_id: str) -> Optional[Dict[str, Any]]:
         return None
     data = json.loads(path.read_text(encoding="utf-8"))
     data["agent"] = None
+    data.setdefault("voice_transcripts", {})
+    data.setdefault("voice_agent_text", {})
+    data.setdefault("voice_messages", [])
     return data
 
 

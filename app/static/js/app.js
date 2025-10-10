@@ -139,6 +139,62 @@ function clearVoiceTranscript() {
     voiceTranscript.innerHTML = '<p class="text-xs text-gray-500">Voice transcripts will appear here once the realtime session begins.</p>';
 }
 
+const voiceRoleToBackend = {
+    agent: 'coach',
+    coach: 'coach',
+    user: 'candidate',
+    candidate: 'candidate',
+    system: 'system',
+};
+
+const voiceRoleToDisplay = {
+    coach: 'agent',
+    candidate: 'user',
+};
+
+function handleUserTranscriptChunk(transcript) {
+    const text = (transcript || '').trim();
+    if (!text) {
+        return;
+    }
+    const appendResult = appendVoiceMessage('user', text);
+    if (!appendResult) {
+        return;
+    }
+    const idx = state.currentQuestionIndex;
+    if (Number.isInteger(idx)) {
+        const existing = state.voice.transcriptsByIndex[idx] || '';
+        state.voice.transcriptsByIndex[idx] = existing ? `${existing}\n${text}` : text;
+    }
+    const persistIdx = Number.isInteger(idx) ? idx : null;
+    persistVoiceMessage('user', text, { questionIndex: persistIdx });
+}
+
+function persistVoiceMessage(role, message, options = {}) {
+    if (!state.sessionId || !message) {
+        return;
+    }
+    const trimmed = String(message).trim();
+    if (!trimmed) {
+        return;
+    }
+    const backendRole = voiceRoleToBackend[role] || role || 'system';
+    const payload = {
+        role: backendRole,
+        text: trimmed,
+        timestamp: options.timestamp || new Date().toISOString(),
+        stream: !!options.stream,
+    };
+    if (Number.isInteger(options.questionIndex)) {
+        payload.question_index = options.questionIndex;
+    }
+    fetch(`/session/${state.sessionId}/voice-messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+    }).catch(() => {});
+}
+
 function appendVoiceMessage(role, message, options = {}) {
     if (!voiceTranscript || !message) {
         return null;
@@ -149,6 +205,15 @@ function appendVoiceMessage(role, message, options = {}) {
         return null;
     }
 
+    const displayRole = voiceRoleToDisplay[role] || role;
+
+    if (state && state.voice && Array.isArray(state.voice.messages) && !options.stream) {
+        const existing = state.voice.messages[state.voice.messages.length - 1];
+        if (existing && existing.role === displayRole && existing.text === text) {
+            return null;
+        }
+    }
+
     if (voiceTranscript.dataset.empty === 'true') {
         voiceTranscript.innerHTML = '';
         delete voiceTranscript.dataset.empty;
@@ -156,18 +221,18 @@ function appendVoiceMessage(role, message, options = {}) {
 
     const wrapper = document.createElement('div');
 
-    if (role === 'agent') {
+    if (displayRole === 'agent') {
         wrapper.className = 'bg-indigo-50 border border-indigo-100 text-indigo-800 text-sm rounded-lg p-3';
-    } else if (role === 'user') {
+    } else if (displayRole === 'user') {
         wrapper.className = 'bg-white border border-gray-200 text-gray-800 text-sm rounded-lg p-3';
     } else {
         wrapper.className = 'text-xs text-gray-500';
     }
 
-    if (role === 'agent' || role === 'user') {
+    if (displayRole === 'agent' || displayRole === 'user') {
         const label = document.createElement('div');
         label.className = 'text-xs uppercase tracking-wide font-semibold mb-1';
-        label.textContent = role === 'agent' ? 'Coach' : 'You';
+        label.textContent = displayRole === 'agent' ? 'Coach' : 'You';
         wrapper.appendChild(label);
 
         const content = document.createElement('p');
@@ -178,7 +243,7 @@ function appendVoiceMessage(role, message, options = {}) {
     }
 
     const entry = {
-        role,
+        role: displayRole,
         text,
         timestamp: new Date().toISOString(),
         stream: !!options.stream,
@@ -250,13 +315,8 @@ function finalizeAgentMessage() {
 
     if (finalText) {
         const idx = state.currentQuestionIndex;
-        if (Number.isInteger(idx) && state.sessionId) {
-            fetch(`/session/${state.sessionId}/voice-agent-text`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ question_index: idx, text: finalText })
-            }).catch(() => {});
-        }
+        const persistIdx = Number.isInteger(idx) ? idx : null;
+        persistVoiceMessage('agent', finalText, { questionIndex: persistIdx });
     }
 
     state.voice.streamingMessage = null;
@@ -338,18 +398,30 @@ function handleVoiceEvent(event) {
         case 'conversation.item.input_audio_transcription.completed':
         case 'input_audio_buffer.speech_transcribed': {
             const transcriptText = event.transcript || event.text || '';
-            if (transcriptText) {
-                appendVoiceMessage('user', transcriptText);
-                // Capture transcript text for the current question index
-                const idx = state.currentQuestionIndex;
-                if (Number.isInteger(idx)) {
-                    const existing = state.voice.transcriptsByIndex[idx] || '';
-                    state.voice.transcriptsByIndex[idx] = existing ? `${existing}\n${transcriptText}` : transcriptText;
-                }
-            }
+            handleUserTranscriptChunk(transcriptText);
+            break;
+        }
+        case 'conversation.item.input_audio_transcription.delta':
+        case 'response.input_audio_transcription.delta':
+        case 'input_audio_buffer.transcript.delta': {
+            const deltaText =
+                event.delta?.transcript ||
+                event.transcript ||
+                (Array.isArray(event.deltas) ? event.deltas.map((d) => d.transcript).join(' ') : '');
+            handleUserTranscriptChunk(deltaText);
             break;
         }
         default: {
+            if (event && typeof event === 'object') {
+                const fallbackTranscript =
+                    event.transcript ||
+                    (event.delta && event.delta.transcript) ||
+                    (Array.isArray(event.deltas) ? event.deltas.map((d) => d.transcript).join(' ') : '');
+                if (fallbackTranscript) {
+                    handleUserTranscriptChunk(fallbackTranscript);
+                    break;
+                }
+            }
             if (event.type && event.type.startsWith('response.audio')) {
                 return;
             }
@@ -358,6 +430,39 @@ function handleVoiceEvent(event) {
             }
         }
     }
+}
+
+function hydrateVoiceMessagesFromSession(sessionData) {
+    if (!sessionData) {
+        return;
+    }
+    if (!state.voice) {
+        state.voice = createInitialVoiceState();
+    }
+    clearVoiceTranscript();
+
+    const transcripts = sessionData.voice_transcripts || {};
+    state.voice.transcriptsByIndex = {};
+    Object.entries(transcripts).forEach(([key, value]) => {
+        const numericKey = Number.isNaN(Number(key)) ? key : Number(key);
+        state.voice.transcriptsByIndex[numericKey] = value;
+    });
+
+    const messages = Array.isArray(sessionData.voice_messages) ? sessionData.voice_messages : [];
+    messages.forEach((msg) => {
+        if (!msg || !msg.text) {
+            return;
+        }
+        const result = appendVoiceMessage(msg.role || 'system', msg.text, { stream: !!msg.stream });
+        if (result && state.voice.messages[result.entryIndex]) {
+            if (msg.timestamp) {
+                state.voice.messages[result.entryIndex].timestamp = msg.timestamp;
+            }
+            if (typeof msg.question_index === 'number') {
+                state.voice.messages[result.entryIndex].question_index = msg.question_index;
+            }
+        }
+    });
 }
 
 async function startVoiceInterview() {
@@ -985,6 +1090,8 @@ async function resumeSavedSession(sessionIdOverride = null) {
             ? state.questions.length - 1
             : clampedIndex;
 
+        hydrateVoiceMessagesFromSession(data);
+
         if (sessionNameEl) {
             sessionNameEl.textContent = state.sessionName || `Session ${String(state.sessionId).slice(0, 8)}`;
         }
@@ -1000,7 +1107,6 @@ async function resumeSavedSession(sessionIdOverride = null) {
         const hasQuestions = state.questions.length > 0;
         setVoiceEnabled(hasQuestions);
         updateVoiceStatus(hasQuestions ? 'Ready for voice coaching' : 'Offline', 'idle');
-        clearVoiceTranscript();
 
         if (!hasQuestions) {
             if (interviewContainer) {
