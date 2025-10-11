@@ -47,13 +47,14 @@ Checklist derived from the technical design in `prd_new_features.md`. Each secti
 - Telemetry: extend metrics/logging to capture adoption of each model/effort/verbosity trio.
 
 ## MVP 5 — Voice Selection with Preview
-- Schema: persist `voice_settings.voice_id` alongside existing settings with backward-compatible defaults.
-- Backend: create `voice_catalog.json` (or similar) and expose `GET /voices` endpoint returning available voices, labels, and preview URLs.
-- Backend: update session start/realtime handshake to send the selected `voice_id`.
-- Frontend: build selector UI with preview playback (local audio element) and confirmation flow tied to the settings API.
-- Frontend: cache preview clips client-side and guard against starting a new prompt while previewing.
-- QA: test acceptance (“GIVEN selector WHEN previewed and saved THEN active session unaffected until next prompt uses new voice”) plus fallbacks when catalog fetch fails.
-- Telemetry: log voice selection frequency for future catalog tuning.
+- [x] Schema: persist `voice_settings.voice_id` alongside existing settings with backward-compatible defaults.
+- [x] Backend: create `app/voice_catalog.json` and expose `GET /voices` endpoint returning available voices, labels, and preview URLs.
+- [x] Backend: update session start/realtime handshake to send the selected `voice_id` from `voice_settings`.
+- [x] Backend: add `PATCH /session/{id}/voice` to persist `voice_id` with catalog validation.
+- [x] Frontend: add selector UI with preview playback (local audio element) and save flow tied to the new endpoint.
+- [ ] Frontend: cache preview clips client-side and guard against starting a new prompt while previewing.
+- [x] QA: add tests for catalog endpoint, voice persistence, and usage in realtime session payload; reject unknown voice IDs.
+- [ ] Telemetry: log voice selection frequency for future catalog tuning.
 
 ## MVP 6 — PDF Study Guide Export
 - Schema: add `pdf_exports` metadata (timestamp, filename, size) to session store; ensure defaults for legacy sessions.

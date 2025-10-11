@@ -141,6 +141,15 @@
                                 <input id="toggle-show-metadata" type="checkbox" class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
                                 <span>Show transcript metadata</span>
                             </label>
+                            <div class="inline-flex items-center gap-2">
+                                <label for="voice-select" class="text-gray-600">Voice</label>
+                                <select id="voice-select" class="border border-gray-300 rounded-md text-xs py-1 px-2">
+                                    <option value="">Loading…</option>
+                                </select>
+                                <button id="voice-preview" class="py-1 px-2 border border-gray-300 rounded-md bg-white hover:bg-gray-50">Preview</button>
+                                <button id="voice-save" class="py-1 px-2 border border-indigo-300 rounded-md bg-indigo-50 text-indigo-700 hover:bg-indigo-100">Save</button>
+                                <audio id="voice-preview-audio" class="hidden"></audio>
+                            </div>
                         </div>
                         <audio id="voice-audio" autoplay playsinline class="hidden"></audio>
                         <div id="voice-transcript" class="mt-4 space-y-2 max-h-64 overflow-y-auto text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-md p-3"></div>

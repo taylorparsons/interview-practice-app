@@ -107,6 +107,10 @@ const voiceActivityLabel = voiceActivityIndicator
 const toggleBrowserAsr = document.getElementById('toggle-browser-asr');
 const toggleShowMetadata = document.getElementById('toggle-show-metadata');
 const exportTranscriptBtn = document.getElementById('export-transcript');
+const voiceSelect = document.getElementById('voice-select');
+const voicePreviewBtn = document.getElementById('voice-preview');
+const voiceSaveBtn = document.getElementById('voice-save');
+const voicePreviewAudio = document.getElementById('voice-preview-audio');
 
 const voiceStatusClasses = {
     idle: 'text-gray-500',
@@ -1241,6 +1245,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setVoiceEnabled(false);
     refreshSessionsList(state.sessionId);
         refreshSwitcherList();
+    initVoiceSelector();
     // Initialize voice settings toggles
     if (toggleBrowserAsr) {
         toggleBrowserAsr.checked = !!(state.voice && state.voice.config && state.voice.config.useBrowserAsr);
@@ -1352,6 +1357,67 @@ function setupEventListeners() {
 
     if (viewDocsBtn) {
         viewDocsBtn.addEventListener('click', toggleDocsPanel);
+    }
+}
+
+async function initVoiceSelector() {
+    try {
+        const res = await fetch('/voices');
+        if (!res.ok) throw new Error('Failed to load voices');
+        const voices = await res.json();
+        if (voiceSelect) {
+            while (voiceSelect.firstChild) voiceSelect.removeChild(voiceSelect.firstChild);
+            voices.forEach(v => {
+                const opt = document.createElement('option');
+                opt.value = v.id;
+                opt.textContent = v.label || v.id;
+                if (v.preview_url) opt.dataset.previewUrl = v.preview_url;
+                voiceSelect.appendChild(opt);
+            });
+        }
+        if (voicePreviewBtn && voiceSelect && voicePreviewAudio) {
+            voicePreviewBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                const opt = voiceSelect.options[voiceSelect.selectedIndex];
+                const url = opt && opt.dataset.previewUrl;
+                if (!url) {
+                    alert('No preview available for this voice.');
+                    return;
+                }
+                try {
+                    voicePreviewAudio.src = url;
+                    voicePreviewAudio.classList.remove('hidden');
+                    voicePreviewAudio.play().catch(() => {});
+                } catch (_) {}
+            });
+        }
+        if (voiceSaveBtn && voiceSelect) {
+            voiceSaveBtn.addEventListener('click', async (e) => {
+                e.preventDefault();
+                if (!state.sessionId) {
+                    alert('Start or resume a session first.');
+                    return;
+                }
+                const voiceId = voiceSelect.value;
+                if (!voiceId) return;
+                try {
+                    const r = await fetch(`/session/${state.sessionId}/voice`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ voice_id: voiceId })
+                    });
+                    if (!r.ok) {
+                        const detail = await r.text();
+                        throw new Error(detail || 'Failed to save voice');
+                    }
+                    alert('Voice saved. New prompts will use this voice.');
+                } catch (err) {
+                    alert(err.message || 'Unable to save voice');
+                }
+            });
+        }
+    } catch (err) {
+        console.warn('Voice catalog unavailable:', err);
     }
 }
 

@@ -5,6 +5,7 @@ import textwrap
 import uuid
 from datetime import datetime
 from typing import List, Dict, Any, Optional
+from functools import lru_cache
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Depends, BackgroundTasks
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -77,6 +78,8 @@ def _ensure_session_defaults(session: Dict[str, Any]) -> Dict[str, Any]:
         session["voice_agent_text"] = {}
     if "voice_messages" not in session or session["voice_messages"] is None:
         session["voice_messages"] = []
+    if "voice_settings" not in session or session["voice_settings"] is None:
+        session["voice_settings"] = {}
     return session
 
 
@@ -203,6 +206,12 @@ class VoiceSessionResponse(BaseModel):
     client_secret: str
     url: str
     expires_at: Optional[int] = None
+
+
+class VoiceDescriptor(BaseModel):
+    id: str
+    label: str
+    preview_url: Optional[str] = None
 
 
 class SessionListItem(BaseModel):
@@ -582,6 +591,7 @@ async def get_session_status(session_id: str):
         "per_question": session.get("per_question", []),
         "voice_agent_text": session.get("voice_agent_text", {}),
         "voice_messages": session.get("voice_messages", []),
+        "voice_settings": session.get("voice_settings", {}),
     }
 
 
@@ -785,7 +795,13 @@ async def create_voice_session(request: VoiceSessionRequest):
         raise HTTPException(status_code=500, detail="OpenAI API key is not configured")
 
     session = _get_session(request.session_id)
-    voice_name = request.voice or OPENAI_REALTIME_VOICE
+    # Determine voice selection precedence: session settings > request override > default
+    selected_voice = None
+    try:
+        selected_voice = (session.get("voice_settings") or {}).get("voice_id")
+    except Exception:
+        selected_voice = None
+    voice_name = selected_voice or request.voice or OPENAI_REALTIME_VOICE
     instructions = _build_voice_instructions(request.session_id, session)
 
     payload: Dict[str, Any] = {
@@ -855,6 +871,53 @@ async def create_voice_session(request: VoiceSessionRequest):
         url=OPENAI_REALTIME_URL,
         expires_at=data.get("expires_at"),
     )
+
+
+@lru_cache(maxsize=1)
+def _load_voice_catalog() -> List[Dict[str, Any]]:
+    """Load static voice catalog from JSON file."""
+    path = os.path.join(os.path.dirname(__file__), "voice_catalog.json")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            import json as _json
+
+            data = _json.load(f)
+            if isinstance(data, list):
+                return data
+    except Exception:
+        logger.exception("Failed to load voice catalog from %s", path)
+    return []
+
+
+@app.get("/voices", response_model=List[VoiceDescriptor])
+async def list_voices():
+    """Return the available voice catalog for selection and preview."""
+    raw = _load_voice_catalog()
+    return [VoiceDescriptor(**item) for item in raw if isinstance(item, dict)]
+
+
+class SetVoiceRequest(BaseModel):
+    voice_id: str
+
+
+@app.patch("/session/{session_id}/voice")
+async def update_session_voice(session_id: str, request: SetVoiceRequest):
+    """Update the session's selected voice. Validates against the catalog."""
+    session = _get_session(session_id)
+    voice_id = (request.voice_id or "").strip()
+    if not voice_id:
+        raise HTTPException(status_code=400, detail="voice_id is required")
+
+    catalog_ids = {item.get("id") for item in _load_voice_catalog() if isinstance(item, dict)}
+    if catalog_ids and voice_id not in catalog_ids:
+        raise HTTPException(status_code=400, detail="Unknown voice_id")
+
+    settings = session.get("voice_settings") or {}
+    settings["voice_id"] = voice_id
+    session["voice_settings"] = settings
+    _persist_session_state(session_id, session)
+
+    return {"ok": True, "voice_id": voice_id}
 
 
 # Helper functions

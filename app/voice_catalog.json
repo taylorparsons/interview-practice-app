@@ -1,0 +1,5 @@
+[
+  { "id": "verse", "label": "Verse (balanced)", "preview_url": "/static/voices/verse-preview.mp3" },
+  { "id": "alloy", "label": "Alloy (crisp)", "preview_url": "/static/voices/alloy-preview.mp3" },
+  { "id": "echo", "label": "Echo (warm)", "preview_url": "/static/voices/echo-preview.mp3" }
+]
