@@ -414,22 +414,33 @@ function handleUserTranscriptChunk(transcript, options = {}) {
             confidence: typeof options.confidence === 'number' ? options.confidence : undefined,
             source: options.source || undefined,
         };
-        // If this is a finalized user chunk and the last finalized speaker was the user,
-        // coalesce into the previous user bubble for display.
+        // If the previous finalized speaker was the user, continue appending to the
+        // last 'You' bubble even for interim chunks to avoid creating a new bubble.
         const lastEntry = state.voice.messages && state.voice.messages[state.voice.messages.length - 1];
-        const canCoalesce = finalize && state.voice.lastFinalSpeaker === 'user' && lastEntry && lastEntry.role === 'user' && !lastEntry.stream;
-        if (canCoalesce && voiceTranscript && voiceTranscript.lastElementChild) {
+        const mayContinueUserBubble = state.voice.lastFinalSpeaker === 'user' && lastEntry && lastEntry.role === 'user' && !lastEntry.stream && voiceTranscript && voiceTranscript.lastElementChild;
+        if (mayContinueUserBubble) {
             const p = voiceTranscript.lastElementChild.querySelector('p');
             if (p) {
-                const joined = (lastEntry.text ? (lastEntry.text + '\n' + text) : text).trim();
+                const base = lastEntry.text || '';
+                const joined = hasContent ? (base ? (base + '\n' + text) : text) : base;
+                // Create a synthetic stream against the last entry
+                state.voice.userStream = {
+                    element: p,
+                    entryIndex: state.voice.messages.length - 1,
+                    text: joined,
+                };
                 p.textContent = joined;
                 lastEntry.text = joined;
+                lastEntry.stream = !finalize;
                 if (Number.isInteger(questionIndex)) {
                     state.voice.transcriptsByIndex[questionIndex] = joined;
                 }
-                const persistIdx = Number.isInteger(questionIndex) ? questionIndex : null;
-                persistVoiceMessage('user', text, { questionIndex: persistIdx });
-                state.voice.lastFinalSpeaker = 'user';
+                if (finalize && hasContent) {
+                    const persistIdx = Number.isInteger(questionIndex) ? questionIndex : null;
+                    persistVoiceMessage('user', text, { questionIndex: persistIdx });
+                    state.voice.userStream = null;
+                    state.voice.lastFinalSpeaker = 'user';
+                }
                 return;
             }
         }
