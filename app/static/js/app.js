@@ -425,7 +425,7 @@ function handleUserTranscriptChunk(transcript, options = {}) {
             const p = voiceTranscript.lastElementChild.querySelector('p');
             if (p) {
                 const base = lastEntry.text || '';
-                const joined = hasContent ? (base ? (base + '\n' + text) : text) : base;
+                const joined = hasContent ? (base ? (base + ' ' + text) : text) : base;
                 // Create a synthetic stream against the last entry
                 state.voice.userStream = {
                     element: p,
@@ -963,7 +963,7 @@ function hydrateVoiceMessagesFromSession(sessionData) {
             if (wrapper) {
                 const p = wrapper.querySelector('p');
                 if (p) {
-                    const joined = (last.text ? (last.text + '\n' + msg.text) : msg.text).trim();
+                    const joined = (last.text ? (last.text + ' ' + msg.text) : msg.text).trim();
                     p.textContent = joined;
                     last.text = joined;
                     return;
