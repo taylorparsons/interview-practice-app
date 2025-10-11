@@ -90,6 +90,18 @@ When the UI loads, upload your resume and either attach a job description file o
 - Conversation summaries stream into the transcript panel while audio plays through the embedded `<audio>` element.
 - Use **Stop Voice Session** to release the connection, or restart the interview to reset the voice UI.
 
+### Input Transcription (speech-to-text)
+Server-side input transcription can be enabled so the candidate’s speech is transcribed within the realtime session and streamed to the UI as text events.
+
+- Env var: `OPENAI_INPUT_TRANSCRIPTION_MODEL`
+  - Default when unset: `gpt-4o-mini-transcribe`
+  - Set to an empty string to disable server-side transcription
+  - Example values:
+    - `OPENAI_INPUT_TRANSCRIPTION_MODEL=gpt-4o-mini-transcribe`
+    - `OPENAI_INPUT_TRANSCRIPTION_MODEL=`
+
+When disabled, you may still use the UI’s “Browser transcription fallback” toggle (if present) for local testing. Changes take effect when starting a new voice session.
+
 ### Voice Turn Detection (VAD) settings
 You can control server-side turn detection behavior via environment variables in `.env`:
 

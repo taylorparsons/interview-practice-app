@@ -17,7 +17,7 @@ Checklist derived from the technical design in `prd_new_features.md`. Each secti
 - [x] Frontend: add toggles for “Browser transcription fallback” and “Show transcript metadata” to aid debugging and offline testing.
 - [x] Frontend: add “Export Transcript” action to download the current session’s transcript log for review/sharing (non-PDF).
 - [x] QA: add test to ensure identical text snippets do not cross roles (candidate vs coach) when persisted to `voice_messages`.
-- [ ] Docs: add `OPENAI_INPUT_TRANSCRIPTION_MODEL` to `.env.example` and README configuration guidance; include example values and how to disable (empty string).
+- [x] Docs: add `OPENAI_INPUT_TRANSCRIPTION_MODEL` to `.env.example` and README configuration guidance; include example values and how to disable (empty string).
 - [ ] QA: manual check for mic-permission-denied surfaces `muted` indicator and helpful copy.
 
 ## MVP 2 — Coach Formatting Preservation
