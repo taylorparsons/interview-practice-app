@@ -39,6 +39,10 @@ OPENAI_TURN_THRESHOLD = os.getenv("OPENAI_TURN_THRESHOLD", "0.5").strip()
 OPENAI_TURN_PREFIX_MS = os.getenv("OPENAI_TURN_PREFIX_MS", "300").strip()
 OPENAI_TURN_SILENCE_MS = os.getenv("OPENAI_TURN_SILENCE_MS", "500").strip()
 
+# Optional: enable server-side input audio transcription for realtime WebRTC
+# Defaults to a lightweight transcribe model; set to empty to disable.
+OPENAI_INPUT_TRANSCRIPTION_MODEL = os.getenv("OPENAI_INPUT_TRANSCRIPTION_MODEL", "gpt-4o-mini-transcribe").strip()
+
 UPLOAD_FOLDER = _resolve_upload_dir(os.getenv("UPLOAD_FOLDER"))
 ALLOWED_EXTENSIONS = _parse_extensions(os.getenv("ALLOWED_EXTENSIONS"), {"pdf", "docx", "txt"})
 
@@ -53,6 +57,7 @@ __all__ = [
     "OPENAI_TURN_THRESHOLD",
     "OPENAI_TURN_PREFIX_MS",
     "OPENAI_TURN_SILENCE_MS",
+    "OPENAI_INPUT_TRANSCRIPTION_MODEL",
     "UPLOAD_FOLDER",
     "ALLOWED_EXTENSIONS",
 ]

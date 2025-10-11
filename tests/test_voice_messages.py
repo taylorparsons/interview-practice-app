@@ -136,3 +136,28 @@ def test_session_payload_read_by_ui_contains_dual_role_messages(session_factory,
     assert voice_messages[0]["text"] == "This is my answer."
     assert voice_messages[1]["role"] == "coach"
     assert voice_messages[1]["text"] == "Coach feedback here."
+
+
+def test_identical_texts_do_not_cross_roles(session_factory, client):
+    """Even identical text snippets must maintain the original roles."""
+    session_id = session_factory()
+    prompt_text = "Hello and welcome. Let's begin the interview."
+
+    first = client.post(
+        f"/session/{session_id}/voice-messages",
+        json={"role": "user", "text": prompt_text, "question_index": 2},
+    )
+    assert first.status_code == 200
+
+    second = client.post(
+        f"/session/{session_id}/voice-messages",
+        json={"role": "agent", "text": prompt_text, "question_index": 2},
+    )
+    assert second.status_code == 200
+
+    data = client.get(f"/session/{session_id}").json()
+    entries = [entry for entry in data["voice_messages"] if entry.get("question_index") == 2]
+    assert entries[0]["role"] == "candidate"
+    assert entries[0]["text"] == prompt_text
+    assert entries[1]["role"] == "coach"
+    assert entries[1]["text"] == prompt_text

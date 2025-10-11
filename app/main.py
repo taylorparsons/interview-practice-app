@@ -19,6 +19,7 @@ from app.config import (
     OPENAI_API_KEY, OPENAI_MODEL, OPENAI_REALTIME_MODEL,
     OPENAI_REALTIME_VOICE, OPENAI_REALTIME_URL,
     OPENAI_TURN_DETECTION, OPENAI_TURN_THRESHOLD, OPENAI_TURN_PREFIX_MS, OPENAI_TURN_SILENCE_MS,
+    OPENAI_INPUT_TRANSCRIPTION_MODEL,
     UPLOAD_FOLDER, ALLOWED_EXTENSIONS,
 )
 from app.utils.document_processor import allowed_file, save_uploaded_file, save_text_as_file, process_documents
@@ -793,6 +794,10 @@ async def create_voice_session(request: VoiceSessionRequest):
         "voice": voice_name,
         "instructions": instructions,
     }
+
+    # Enable server-side speech-to-text so user utterances arrive as transcript events
+    if OPENAI_INPUT_TRANSCRIPTION_MODEL:
+        payload["input_audio_transcription"] = {"model": OPENAI_INPUT_TRANSCRIPTION_MODEL}
 
     # Optional server-side VAD (turn detection) configuration
     try:

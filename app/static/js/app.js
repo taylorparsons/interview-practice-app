@@ -10,7 +10,14 @@ function createInitialVoiceState() {
         transcriptBuffer: '',
         transcriptsByIndex: {},
         messages: [],
-        streamingMessage: null,
+        agentStream: null,
+        userStream: null,
+        activityMonitor: null,
+        browserAsrActive: false,
+        config: {
+            useBrowserAsr: true,
+            showMetadata: false,
+        },
     };
 }
 
@@ -90,6 +97,16 @@ const stopVoiceBtn = document.getElementById('stop-voice');
 const voiceStatus = document.getElementById('voice-status');
 const voiceTranscript = document.getElementById('voice-transcript');
 const voiceAudio = document.getElementById('voice-audio');
+const voiceActivityIndicator = document.getElementById('voice-activity-indicator');
+const voiceActivityDot = voiceActivityIndicator
+    ? voiceActivityIndicator.querySelector('[data-indicator-dot]')
+    : null;
+const voiceActivityLabel = voiceActivityIndicator
+    ? voiceActivityIndicator.querySelector('[data-indicator-label]')
+    : null;
+const toggleBrowserAsr = document.getElementById('toggle-browser-asr');
+const toggleShowMetadata = document.getElementById('toggle-show-metadata');
+const exportTranscriptBtn = document.getElementById('export-transcript');
 
 const voiceStatusClasses = {
     idle: 'text-gray-500',
@@ -97,6 +114,16 @@ const voiceStatusClasses = {
     live: 'text-green-600',
     error: 'text-red-600'
 };
+
+const baseVoiceActivityDotClass = 'inline-flex h-2.5 w-2.5 rounded-full transition';
+const voiceActivityModes = {
+    idle: { dot: 'bg-gray-300', label: 'Mic idle' },
+    listening: { dot: 'bg-amber-400', label: 'Listening…' },
+    speaking: { dot: 'bg-green-500 animate-pulse', label: 'Hearing you…' },
+    muted: { dot: 'bg-red-500', label: 'Mic blocked' },
+    unsupported: { dot: 'bg-gray-400', label: 'Mic level unavailable' },
+};
+let voiceActivityState = 'idle';
 
 function setVoiceControls(active) {
     if (startVoiceBtn) {
@@ -131,12 +158,14 @@ function clearVoiceTranscript() {
     }
     if (state && state.voice) {
         state.voice.transcriptBuffer = '';
-        state.voice.streamingMessage = null;
+        state.voice.agentStream = null;
+        state.voice.userStream = null;
         state.voice.transcriptsByIndex = {};
         state.voice.messages = [];
     }
     voiceTranscript.dataset.empty = 'true';
     voiceTranscript.innerHTML = '<p class="text-xs text-gray-500">Voice transcripts will appear here once the realtime session begins.</p>';
+    setVoiceActivityIndicator('idle');
 }
 
 const voiceRoleToBackend = {
@@ -152,22 +181,273 @@ const voiceRoleToDisplay = {
     candidate: 'user',
 };
 
-function handleUserTranscriptChunk(transcript) {
-    const text = (transcript || '').trim();
-    if (!text) {
+function findTextCandidate(input, depth = 0, seen = new Set()) {
+    if (!input || depth > 4) {
+        return '';
+    }
+    if (typeof input === 'string') {
+        const trimmed = input.trim();
+        if (trimmed && trimmed.length <= 4000) {
+            return trimmed;
+        }
+        return '';
+    }
+    if (typeof input !== 'object') {
+        return '';
+    }
+    if (seen.has(input)) {
+        return '';
+    }
+    seen.add(input);
+
+    const prioritizedKeys = ['transcript', 'text', 'value', 'caption', 'utterance'];
+    for (const key of prioritizedKeys) {
+        if (typeof input[key] === 'string') {
+            const candidate = input[key].trim();
+            if (candidate) {
+                return candidate;
+            }
+        }
+    }
+
+    const collections = Array.isArray(input) ? input : Object.values(input);
+    for (const entry of collections) {
+        const found = findTextCandidate(entry, depth + 1, seen);
+        if (found) {
+            return found;
+        }
+    }
+
+    return '';
+}
+
+function extractTranscriptFromRealtimeItem(item) {
+    if (!item || typeof item !== 'object') {
+        return '';
+    }
+
+    if (typeof item.formatted === 'string') {
+        const formattedPlain = item.formatted.trim();
+        if (formattedPlain) {
+            return formattedPlain;
+        }
+    }
+    if (item.formatted && typeof item.formatted === 'object') {
+        const formattedTranscript =
+            item.formatted.transcript || item.formatted.text || item.formatted.value || '';
+        if (typeof formattedTranscript === 'string' && formattedTranscript.trim()) {
+            return formattedTranscript.trim();
+        }
+        if (Array.isArray(item.formatted.messages)) {
+            for (const message of item.formatted.messages) {
+                const candidate = extractTranscriptFromRealtimeItem(message);
+                if (candidate) {
+                    return candidate;
+                }
+            }
+        }
+    }
+
+    if (Array.isArray(item.content)) {
+        for (const element of item.content) {
+            const candidate = extractTranscriptFromRealtimeItem(element);
+            if (candidate) {
+                return candidate;
+            }
+        }
+    }
+
+    const direct = findTextCandidate(item);
+    return direct;
+}
+
+function setVoiceActivityIndicator(mode) {
+    if (!voiceActivityIndicator) {
         return;
     }
-    const appendResult = appendVoiceMessage('user', text);
-    if (!appendResult) {
+    const config = voiceActivityModes[mode] || voiceActivityModes.idle;
+    voiceActivityState = mode;
+    if (voiceActivityDot) {
+        voiceActivityDot.className = `${baseVoiceActivityDotClass} ${config.dot}`;
+    }
+    if (voiceActivityLabel) {
+        voiceActivityLabel.textContent = config.label;
+    }
+}
+
+function stopVoiceActivityMonitor() {
+    if (!state || !state.voice || !state.voice.activityMonitor) {
+        setVoiceActivityIndicator('idle');
         return;
     }
-    const idx = state.currentQuestionIndex;
-    if (Number.isInteger(idx)) {
-        const existing = state.voice.transcriptsByIndex[idx] || '';
-        state.voice.transcriptsByIndex[idx] = existing ? `${existing}\n${text}` : text;
+    const monitor = state.voice.activityMonitor;
+    if (monitor.rafId) {
+        cancelAnimationFrame(monitor.rafId);
     }
-    const persistIdx = Number.isInteger(idx) ? idx : null;
-    persistVoiceMessage('user', text, { questionIndex: persistIdx });
+    if (monitor.source) {
+        try {
+            monitor.source.disconnect();
+        } catch (_) {}
+    }
+    if (monitor.context && typeof monitor.context.close === 'function') {
+        monitor.context.close().catch(() => {});
+    }
+    state.voice.activityMonitor = null;
+    setVoiceActivityIndicator('idle');
+}
+
+function startVoiceActivityMonitor(stream) {
+    if (!stream) {
+        return;
+    }
+    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextCtor) {
+        setVoiceActivityIndicator('unsupported');
+        return;
+    }
+    stopVoiceActivityMonitor();
+
+    const context = new AudioContextCtor();
+    const source = context.createMediaStreamSource(stream);
+    const analyser = context.createAnalyser();
+    analyser.fftSize = 512;
+    source.connect(analyser);
+
+    const dataArray = new Uint8Array(analyser.fftSize);
+    const monitor = {
+        context,
+        analyser,
+        source,
+        dataArray,
+        rafId: null,
+        lastSpeechAt: performance.now(),
+    };
+
+    const threshold = 0.045;
+    const silenceWindowMs = 600;
+
+    const tick = () => {
+        analyser.getByteTimeDomainData(dataArray);
+        let sumSquares = 0;
+        for (let i = 0; i < dataArray.length; i += 1) {
+            const centered = (dataArray[i] - 128) / 128;
+            sumSquares += centered * centered;
+        }
+        const rms = Math.sqrt(sumSquares / dataArray.length);
+        const speaking = rms > threshold;
+        if (speaking) {
+            monitor.lastSpeechAt = performance.now();
+            if (voiceActivityState !== 'speaking') {
+                setVoiceActivityIndicator('speaking');
+            }
+        } else if (performance.now() - monitor.lastSpeechAt > silenceWindowMs) {
+            if (voiceActivityState !== 'listening') {
+                setVoiceActivityIndicator('listening');
+            }
+        }
+        monitor.rafId = requestAnimationFrame(tick);
+    };
+
+    if (context.state === 'suspended' && typeof context.resume === 'function') {
+        context.resume().catch(() => {});
+    }
+
+    state.voice.activityMonitor = monitor;
+    setVoiceActivityIndicator('listening');
+    tick();
+}
+
+function handleUserTranscriptChunk(transcript, options = {}) {
+    if (!state || !state.voice) {
+        return;
+    }
+
+    const finalize = !!options.finalize;
+    const rawText = typeof transcript === 'string' ? transcript : '';
+    const text = rawText.trim();
+    const hasContent = text.length > 0;
+    const questionIndex = state.currentQuestionIndex;
+
+    if (!state.voice.userStream && !hasContent) {
+        return;
+    }
+
+    if (!state.voice.userStream) {
+        const meta = {
+            ts: Date.now(),
+            confidence: typeof options.confidence === 'number' ? options.confidence : undefined,
+            source: options.source || undefined,
+        };
+        const result = appendVoiceMessage('user', text, { stream: !finalize, meta });
+        if (!result) {
+            return;
+        }
+        state.voice.userStream = {
+            element: result.wrapper.querySelector('p'),
+            entryIndex: result.entryIndex,
+            text,
+        };
+    } else {
+        const stream = state.voice.userStream;
+        const updatedText = hasContent ? text : stream.text || '';
+        stream.text = updatedText;
+        if (stream.element) {
+            stream.element.textContent = updatedText;
+        }
+        if (
+            Number.isInteger(stream.entryIndex) &&
+            state.voice.messages &&
+            state.voice.messages[stream.entryIndex]
+        ) {
+            state.voice.messages[stream.entryIndex].text = updatedText;
+            state.voice.messages[stream.entryIndex].stream = !finalize;
+        }
+    }
+
+    const active = state.voice.userStream;
+
+    if (!finalize && active && active.text) {
+        if (Number.isInteger(questionIndex)) {
+            state.voice.transcriptsByIndex[questionIndex] = active.text;
+        }
+        return;
+    }
+
+    if (finalize && active) {
+        const finalText = (text || active.text || '').trim();
+        if (!finalText) {
+            state.voice.userStream = null;
+            return;
+        }
+
+        if (active.element) {
+            active.element.textContent = finalText;
+        }
+        if (
+            Number.isInteger(active.entryIndex) &&
+            state.voice.messages &&
+            state.voice.messages[active.entryIndex]
+        ) {
+            state.voice.messages[active.entryIndex].text = finalText;
+            state.voice.messages[active.entryIndex].stream = false;
+        }
+
+        if (Number.isInteger(questionIndex)) {
+            state.voice.transcriptsByIndex[questionIndex] = finalText;
+        }
+
+        if (answerInput) {
+            const existingValue = answerInput.value || '';
+            if (!existingValue.trim()) {
+                answerInput.value = finalText;
+            }
+        }
+
+        const persistIdx = Number.isInteger(questionIndex) ? questionIndex : null;
+        persistVoiceMessage('user', finalText, { questionIndex: persistIdx });
+
+        state.voice.userStream = null;
+    }
 }
 
 function persistVoiceMessage(role, message, options = {}) {
@@ -238,6 +518,31 @@ function appendVoiceMessage(role, message, options = {}) {
         const content = document.createElement('p');
         content.textContent = text;
         wrapper.appendChild(content);
+        if (state.voice && state.voice.config && state.voice.config.showMetadata && options.meta) {
+            const meta = options.meta || {};
+            const parts = [];
+            if (meta.ts) {
+                try {
+                    const dt = new Date(meta.ts);
+                    const hh = String(dt.getHours()).padStart(2, '0');
+                    const mm = String(dt.getMinutes()).padStart(2, '0');
+                    const ss = String(dt.getSeconds()).padStart(2, '0');
+                    parts.push(`${hh}:${mm}:${ss}`);
+                } catch (_) {}
+            }
+            if (typeof meta.confidence === 'number') {
+                parts.push(`conf ${meta.confidence.toFixed(2)}`);
+            }
+            if (meta.source) {
+                parts.push(String(meta.source));
+            }
+            if (parts.length) {
+                const metaLine = document.createElement('div');
+                metaLine.className = 'mt-1 text-[10px] text-gray-500';
+                metaLine.textContent = parts.join(' • ');
+                wrapper.appendChild(metaLine);
+            }
+        }
     } else {
         wrapper.textContent = text;
     }
@@ -248,6 +553,9 @@ function appendVoiceMessage(role, message, options = {}) {
         timestamp: new Date().toISOString(),
         stream: !!options.stream,
     };
+    if (options.meta) {
+        entry.meta = options.meta;
+    }
     let entryIndex = null;
     if (state && state.voice && Array.isArray(state.voice.messages)) {
         state.voice.messages.push(entry);
@@ -270,11 +578,11 @@ function appendAgentDelta(text) {
         return;
     }
 
-    if (!state.voice.streamingMessage || state.voice.streamingMessage.role !== 'agent') {
+    if (!state.voice.agentStream || state.voice.agentStream.role !== 'agent') {
         const result = appendVoiceMessage('agent', cleanText, { stream: true });
         if (result) {
             const contentEl = result.wrapper.querySelector('p');
-            state.voice.streamingMessage = {
+            state.voice.agentStream = {
                 role: 'agent',
                 element: contentEl,
                 entryIndex: result.entryIndex,
@@ -282,13 +590,16 @@ function appendAgentDelta(text) {
             };
         }
     } else {
-        const stream = state.voice.streamingMessage;
+        const stream = state.voice.agentStream;
         stream.text += cleanText;
         const updated = stream.text;
         if (stream.element) {
             stream.element.textContent = updated;
         }
-        if (state.voice.messages[stream.entryIndex]) {
+        if (
+            Array.isArray(state.voice.messages) &&
+            state.voice.messages[stream.entryIndex]
+        ) {
             state.voice.messages[stream.entryIndex].text = updated;
         }
     }
@@ -296,19 +607,27 @@ function appendAgentDelta(text) {
 }
 
 function finalizeAgentMessage() {
-    const active = state.voice.streamingMessage;
+    const active = state.voice.agentStream;
     const finalText = (active && active.text ? active.text : state.voice.transcriptBuffer).trim();
 
     if (active && active.element) {
         active.element.textContent = finalText;
     }
-    if (active && state.voice.messages[active.entryIndex]) {
+    if (
+        active &&
+        Array.isArray(state.voice.messages) &&
+        state.voice.messages[active.entryIndex]
+    ) {
         state.voice.messages[active.entryIndex].text = finalText;
         state.voice.messages[active.entryIndex].stream = false;
     }
     if (!active && finalText) {
         const result = appendVoiceMessage('agent', finalText);
-        if (result && state.voice.messages[result.entryIndex]) {
+        if (
+            result &&
+            Array.isArray(state.voice.messages) &&
+            state.voice.messages[result.entryIndex]
+        ) {
             state.voice.messages[result.entryIndex].stream = false;
         }
     }
@@ -319,7 +638,7 @@ function finalizeAgentMessage() {
         persistVoiceMessage('agent', finalText, { questionIndex: persistIdx });
     }
 
-    state.voice.streamingMessage = null;
+    state.voice.agentStream = null;
     state.voice.transcriptBuffer = '';
 }
 
@@ -374,7 +693,7 @@ function handleVoiceEvent(event) {
         }
         case 'output_audio_buffer.started': {
             state.voice.transcriptBuffer = '';
-            state.voice.streamingMessage = null;
+            state.voice.agentStream = null;
             break;
         }
         case 'response.output_text.done':
@@ -383,7 +702,7 @@ function handleVoiceEvent(event) {
             break;
         }
         case 'response.created': {
-            if (!state.voice.streamingMessage) {
+            if (!state.voice.agentStream) {
                 appendAgentDelta('');
             }
             break;
@@ -396,9 +715,10 @@ function handleVoiceEvent(event) {
             break;
         }
         case 'conversation.item.input_audio_transcription.completed':
+        case 'response.input_audio_transcription.completed':
         case 'input_audio_buffer.speech_transcribed': {
             const transcriptText = event.transcript || event.text || '';
-            handleUserTranscriptChunk(transcriptText);
+            handleUserTranscriptChunk(transcriptText, { finalize: true });
             break;
         }
         case 'conversation.item.input_audio_transcription.delta':
@@ -411,15 +731,89 @@ function handleVoiceEvent(event) {
             handleUserTranscriptChunk(deltaText);
             break;
         }
+        case 'input_audio_buffer.speech_started': {
+            setVoiceActivityIndicator('speaking');
+            break;
+        }
+        case 'input_audio_buffer.speech_stopped':
+        case 'input_audio_buffer.committed': {
+            setVoiceActivityIndicator('listening');
+            break;
+        }
+        case 'conversation.item.created':
+        case 'conversation.item.updated': {
+            const item = event.item || {};
+            const role = (item.role || '').toLowerCase();
+            let text = extractTranscriptFromRealtimeItem(item);
+            const isFinal = item.status === 'completed' || event.type === 'conversation.item.updated';
+            const contentParts = Array.isArray(item.content) ? item.content : [];
+            const hasAudioOnly =
+                contentParts.length > 0 &&
+                contentParts.every(
+                    (part) =>
+                        part &&
+                        typeof part === 'object' &&
+                        (part.type === 'input_audio' || part.type === 'audio' || part.type === 'audio_attachment')
+                );
+            const hasTextLikePart = contentParts.some(
+                (part) =>
+                    part &&
+                    typeof part === 'object' &&
+                    ['input_text', 'output_text', 'text', 'input_audio.transcription'].includes(part.type) &&
+                    typeof (part.text || part.transcript || part.value) === 'string'
+            );
+
+            if (hasAudioOnly && !hasTextLikePart) {
+                text = '';
+            }
+
+            if ((role === 'user' || role === 'candidate') && text) {
+                if (/^input_audio$/i.test(text)) {
+                    text = '';
+                }
+            }
+
+            if ((role === 'user' || role === 'candidate') && text) {
+                handleUserTranscriptChunk(text, { finalize: isFinal });
+            } else if ((role === 'assistant' || role === 'coach') && text && isFinal) {
+                // Avoid duplicating existing streaming updates
+                if (!state.voice.agentStream) {
+                    appendVoiceMessage('agent', text, { stream: false });
+                    const idx = state.currentQuestionIndex;
+                    const persistIdx = Number.isInteger(idx) ? idx : null;
+                    persistVoiceMessage('agent', text, { questionIndex: persistIdx });
+                }
+            }
+            break;
+        }
         default: {
             if (event && typeof event === 'object') {
-                const fallbackTranscript =
-                    event.transcript ||
-                    (event.delta && event.delta.transcript) ||
-                    (Array.isArray(event.deltas) ? event.deltas.map((d) => d.transcript).join(' ') : '');
-                if (fallbackTranscript) {
-                    handleUserTranscriptChunk(fallbackTranscript);
-                    break;
+                const rawType = typeof event.type === 'string' ? event.type.toLowerCase() : '';
+                const roleCandidates = [
+                    event.role,
+                    event.source && event.source.role,
+                    event.participant && event.participant.role,
+                    event.delta && event.delta.role,
+                    event.delta && event.delta.source && event.delta.source.role,
+                ]
+                    .filter(Boolean)
+                    .map((role) => String(role).toLowerCase());
+
+                const fromUserRole = roleCandidates.some((role) => role === 'user' || role === 'candidate');
+                const looksLikeUserInput =
+                    rawType.includes('input_audio') ||
+                    rawType.includes('speech') ||
+                    rawType.includes('microphone');
+
+                if (fromUserRole || looksLikeUserInput) {
+                    const fallbackTranscript =
+                        event.transcript ||
+                        (event.delta && event.delta.transcript) ||
+                        (Array.isArray(event.deltas) ? event.deltas.map((d) => d.transcript).join(' ') : '');
+                    if (fallbackTranscript) {
+                        handleUserTranscriptChunk(fallbackTranscript, { finalize: true });
+                        break;
+                    }
                 }
             }
             if (event.type && event.type.startsWith('response.audio')) {
@@ -521,6 +915,7 @@ async function startVoiceInterview() {
 
         dataChannel.onopen = () => {
             updateVoiceStatus('Live', 'live');
+            startBrowserAsrIfAvailable();
             const openingQuestion =
                 state.questions[state.currentQuestionIndex] ||
                 state.questions[0] ||
@@ -557,6 +952,7 @@ async function startVoiceInterview() {
         const localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
         state.voice.localStream = localStream;
         localStream.getTracks().forEach(track => peer.addTrack(track, localStream));
+        startVoiceActivityMonitor(localStream);
 
         peer.ontrack = (event) => {
             if (!voiceAudio) {
@@ -598,6 +994,11 @@ async function startVoiceInterview() {
         appendVoiceMessage('system', `Voice session error: ${error.message}`);
         updateVoiceStatus('Connection failed', 'error');
         stopVoiceInterview({ silent: true, preserveStatus: true });
+        if (error && (error.name === 'NotAllowedError' || error.name === 'SecurityError')) {
+            setVoiceActivityIndicator('muted');
+        } else if (error && (error.name === 'NotFoundError' || error.name === 'NotReadableError')) {
+            setVoiceActivityIndicator('unsupported');
+        }
         setVoiceControls(false);
     }
 }
@@ -630,6 +1031,8 @@ function stopVoiceInterview(options = {}) {
         voiceAudio.classList.add('hidden');
     }
 
+    stopVoiceActivityMonitor();
+    stopBrowserAsr();
     state.voice = createInitialVoiceState();
 
     if (!preserveStatus) {
@@ -656,14 +1059,18 @@ function setupSpeechRecognition() {
     // Add the mic button if not already present
     createMicButton();
     
-    // Handle recognition results
+    // Handle recognition results (browser ASR fallback)
     state.recognition.onresult = (event) => {
         let interimTranscript = '';
         let finalTranscript = '';
+        let finalConfidence = null;
         
         for (let i = event.resultIndex; i < event.results.length; ++i) {
             if (event.results[i].isFinal) {
                 finalTranscript += event.results[i][0].transcript;
+                if (typeof event.results[i][0].confidence === 'number') {
+                    finalConfidence = event.results[i][0].confidence;
+                }
             } else {
                 interimTranscript += event.results[i][0].transcript;
             }
@@ -672,16 +1079,35 @@ function setupSpeechRecognition() {
         if (finalTranscript) {
             // Append to textarea instead of replacing
             answerInput.value += ' ' + finalTranscript;
+            if (state.voice && state.voice.config && state.voice.config.useBrowserAsr) {
+                try { handleUserTranscriptChunk(finalTranscript, { finalize: true, source: 'browser_asr', confidence: finalConfidence }); } catch (_) {}
+            }
+        } else if (interimTranscript) {
+            if (state.voice && state.voice.config && state.voice.config.useBrowserAsr) {
+                try { handleUserTranscriptChunk(interimTranscript, { finalize: false, source: 'browser_asr' }); } catch (_) {}
+            }
         }
+    };
+    
+    state.recognition.onspeechstart = () => {
+        setVoiceActivityIndicator('speaking');
+    };
+    state.recognition.onspeechend = () => {
+        setVoiceActivityIndicator('listening');
     };
     
     state.recognition.onerror = (event) => {
         console.error('Speech recognition error', event.error);
-        stopRecording();
+        stopBrowserAsr();
     };
     
     state.recognition.onend = () => {
-        stopRecording();
+        state.isRecording = false;
+        state.voice.browserAsrActive = false;
+        // When voice session is live, attempt to restart for continuous capture
+        if (state.voice && state.voice.peer && state.voice.dataChannel && state.voice.config && state.voice.config.useBrowserAsr) {
+            try { state.recognition.start(); state.isRecording = true; state.voice.browserAsrActive = true; } catch (_) {}
+        }
     };
     
     return true;
@@ -740,6 +1166,7 @@ function startRecording() {
         try {
             state.recognition.start();
             state.isRecording = true;
+            if (state.voice) { state.voice.browserAsrActive = true; }
             
             // Update UI
             const micButton = document.getElementById('mic-button');
@@ -764,6 +1191,7 @@ function stopRecording() {
     if (state.recognition && state.isRecording) {
         state.recognition.stop();
         state.isRecording = false;
+        if (state.voice) { state.voice.browserAsrActive = false; }
         
         // Update UI
         const micButton = document.getElementById('mic-button');
@@ -780,6 +1208,29 @@ function stopRecording() {
     }
 }
 
+function startBrowserAsrIfAvailable() {
+    try {
+        if (!state.recognition) {
+            if (!setupSpeechRecognition()) return;
+        }
+        state.recognition.start();
+        state.isRecording = true;
+        if (state.voice) { state.voice.browserAsrActive = true; }
+    } catch (e) {
+        // Some browsers require a user gesture; ignore failures
+    }
+}
+
+function stopBrowserAsr() {
+    try {
+        if (state.recognition) {
+            state.recognition.stop();
+        }
+    } catch (_) {}
+    state.isRecording = false;
+    if (state.voice) { state.voice.browserAsrActive = false; }
+}
+
 // Event listeners
 document.addEventListener('DOMContentLoaded', () => {
     setupEventListeners();
@@ -790,6 +1241,31 @@ document.addEventListener('DOMContentLoaded', () => {
     setVoiceEnabled(false);
     refreshSessionsList(state.sessionId);
         refreshSwitcherList();
+    // Initialize voice settings toggles
+    if (toggleBrowserAsr) {
+        toggleBrowserAsr.checked = !!(state.voice && state.voice.config && state.voice.config.useBrowserAsr);
+        toggleBrowserAsr.addEventListener('change', () => {
+            if (state.voice && state.voice.config) {
+                state.voice.config.useBrowserAsr = !!toggleBrowserAsr.checked;
+                if (!toggleBrowserAsr.checked) {
+                    stopBrowserAsr();
+                } else if (state.voice.peer && state.voice.dataChannel) {
+                    startBrowserAsrIfAvailable();
+                }
+            }
+        });
+    }
+    if (toggleShowMetadata) {
+        toggleShowMetadata.checked = !!(state.voice && state.voice.config && state.voice.config.showMetadata);
+        toggleShowMetadata.addEventListener('change', () => {
+            if (state.voice && state.voice.config) {
+                state.voice.config.showMetadata = !!toggleShowMetadata.checked;
+            }
+        });
+    }
+    if (exportTranscriptBtn) {
+        exportTranscriptBtn.addEventListener('click', exportFullTranscript);
+    }
 });
 
 window.addEventListener('beforeunload', () => {
@@ -877,6 +1353,34 @@ function setupEventListeners() {
     if (viewDocsBtn) {
         viewDocsBtn.addEventListener('click', toggleDocsPanel);
     }
+}
+
+function exportFullTranscript() {
+    if (!state.sessionId) {
+        alert('Start a session first.');
+        return;
+    }
+    fetch(`/session/${state.sessionId}`)
+        .then(r => (r.ok ? r.json() : Promise.reject(new Error('Failed to load session'))))
+        .then(data => {
+            const msgs = Array.isArray(data.voice_messages) ? data.voice_messages : [];
+            const lines = [];
+            msgs.forEach(m => {
+                const role = (m.role === 'coach' || m.role === 'agent') ? 'Coach' : (m.role === 'candidate' || m.role === 'user') ? 'You' : 'System';
+                const ts = m.timestamp ? new Date(m.timestamp).toISOString() : '';
+                const line = [ts, role + ':', m.text || ''].filter(Boolean).join(' ');
+                lines.push(line);
+            });
+            const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `interview_transcript_${(state.sessionName || state.sessionId || 'session')}.txt`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+        })
+        .catch(() => alert('Unable to export transcript.'));
 }
 
 async function renameSelectedSession() {

@@ -124,6 +124,23 @@
                             <button id="stop-voice" class="hidden inline-flex justify-center items-center py-2 px-4 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
                                 Stop Voice Session
                             </button>
+                            <button id="export-transcript" class="inline-flex justify-center items-center py-2 px-3 border border-gray-300 text-xs font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500" title="Download full transcript">
+                                Export Transcript
+                            </button>
+                        </div>
+                        <div id="voice-activity-indicator" class="mt-2 flex items-center text-xs text-gray-500 space-x-2">
+                            <span data-indicator-dot class="inline-flex h-2.5 w-2.5 rounded-full bg-gray-300 transition"></span>
+                            <span data-indicator-label>Mic idle</span>
+                        </div>
+                        <div class="mt-2 flex flex-wrap items-center gap-4 text-xs text-gray-600">
+                            <label class="inline-flex items-center gap-2">
+                                <input id="toggle-browser-asr" type="checkbox" class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" checked>
+                                <span>Browser transcription fallback</span>
+                            </label>
+                            <label class="inline-flex items-center gap-2">
+                                <input id="toggle-show-metadata" type="checkbox" class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
+                                <span>Show transcript metadata</span>
+                            </label>
                         </div>
                         <audio id="voice-audio" autoplay playsinline class="hidden"></audio>
                         <div id="voice-transcript" class="mt-4 space-y-2 max-h-64 overflow-y-auto text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-md p-3"></div>
