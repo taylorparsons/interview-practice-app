@@ -61,6 +61,8 @@ const viewDocsBtn = document.getElementById('view-docs');
 const resumeDocEl = document.getElementById('resume-doc');
 const jobDocEl = document.getElementById('jobdoc-doc');
 const resumeActions = document.getElementById('resume-actions');
+// Manual answer UI controls (hidden during live voice)
+const answerLabel = document.querySelector('label[for="answer"]');
 const resumeSessionBtn = document.getElementById('resume-session');
 const clearSessionBtn = document.getElementById('clear-session');
 const sessionsSelect = document.getElementById('saved-sessions');
@@ -142,6 +144,25 @@ function setVoiceControls(active) {
     }
     if (stopVoiceBtn) {
         stopVoiceBtn.classList.toggle('hidden', !active);
+    }
+}
+
+// Toggle layout between typed/manual vs. live voice
+function setVoiceLayout(isLive) {
+    // Hide manual input controls while voice is live
+    if (answerLabel) answerLabel.classList.toggle('hidden', isLive);
+    if (answerInput) answerInput.classList.toggle('hidden', isLive);
+    if (answerBtn) answerBtn.classList.toggle('hidden', isLive);
+    if (getExampleBtn) getExampleBtn.classList.toggle('hidden', isLive);
+    const micButtonEl = document.getElementById('mic-button');
+    if (micButtonEl) {
+        const container = micButtonEl.parentElement || micButtonEl;
+        container.classList.toggle('hidden', isLive);
+    }
+    // Expand transcript viewport while live for better readability
+    if (voiceTranscript) {
+        voiceTranscript.classList.toggle('max-h-64', !isLive);
+        voiceTranscript.classList.toggle('max-h-96', isLive);
     }
 }
 
@@ -918,6 +939,7 @@ async function startVoiceInterview() {
     }
 
     setVoiceControls(true);
+    setVoiceLayout(true);
     updateVoiceStatus('Connecting...', 'pending');
     clearVoiceTranscript();
     appendVoiceMessage('system', '--- Starting new voice session ---');
@@ -1095,6 +1117,7 @@ function stopVoiceInterview(options = {}) {
     }
 
     setVoiceControls(false);
+    setVoiceLayout(false);
 }
 
 // Speech Recognition Setup
