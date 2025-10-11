@@ -11,6 +11,15 @@ Checklist derived from the technical design in `prd_new_features.md`. Each secti
 - [x] QA: create automated integration covering “GIVEN voice session active WHEN candidate speaks THEN timeline/session JSON include candidate entry” plus manual smoke test for reconnection.
 - [x] Analytics: instrument transcript completeness metric (95% target) via counters in existing logging pipeline.
 
+### MVP 1.1 — Realtime Transcription + UX Signals
+- [x] Backend: enable server-side input transcription by adding `input_audio_transcription` to the realtime session payload, configurable via `OPENAI_INPUT_TRANSCRIPTION_MODEL` (default `gpt-4o-mini-transcribe`).
+- [x] Frontend: add microphone activity indicator with states `idle`, `listening`, `speaking`, `muted`, and `unsupported` using Web Audio; reset on session end.
+- [x] Frontend: add toggles for “Browser transcription fallback” and “Show transcript metadata” to aid debugging and offline testing.
+- [x] Frontend: add “Export Transcript” action to download the current session’s transcript log for review/sharing (non-PDF).
+- [x] QA: add test to ensure identical text snippets do not cross roles (candidate vs coach) when persisted to `voice_messages`.
+- [ ] Docs: add `OPENAI_INPUT_TRANSCRIPTION_MODEL` to `.env.example` and README configuration guidance; include example values and how to disable (empty string).
+- [ ] QA: manual check for mic-permission-denied surfaces `muted` indicator and helpful copy.
+
 ## MVP 2 — Coach Formatting Preservation
 - Schema: store raw Markdown in `voice_messages` while caching sanitized HTML for render/export to avoid recomputation.
 - Backend: update `InterviewPracticeAgent` to stop flattening guidance and pass Markdown through; integrate python-markdown + bleach sanitizer.

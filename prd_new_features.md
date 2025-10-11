@@ -160,9 +160,10 @@ Outcome: Structured artifact for deliberate practice.
 
 ### MVP 1 — Dual-Sided Voice Transcripts
 - **Existing**: The realtime pipeline only persists coach utterances returned from OpenAI, writing them into session JSON via the `InterviewPracticeAgent`. Candidate speech streams directly to OpenAI with no transcription callback.
-- **Additions**: Extend the WebRTC client to fork the outbound audio into an on-device transcription task (OpenAI Realtime `input_audio_transcription=true`) and emit interim/final text packets over the existing websocket channel. FastAPI handlers append `{role, text, timestamp, stream_state}` objects to `voice_messages`, mirroring coach entries. The timeline UI listens for `candidate_transcript` events and renders them without waiting for session save to avoid UI lag.
+- **Additions**: Enable server-side input transcription by including `input_audio_transcription: { model: OPENAI_INPUT_TRANSCRIPTION_MODEL }` when creating the realtime session. Emit interim/final text packets for both roles over the existing channel. FastAPI handlers append `{role, text, timestamp, question_index}` objects to `voice_messages`, mirroring coach entries. The timeline UI renders candidate transcripts immediately without waiting for session save to avoid UI lag. Include a browser transcription fallback toggle for environments where server-side transcription is disabled.
+- **UI/UX**: Add a microphone activity indicator with states `idle`, `listening`, `speaking`, `muted`, and `unsupported` using Web Audio; add a “Show transcript metadata” toggle for debugging; provide an “Export Transcript” action to download the current session transcript (JSON/plain text) prior to full PDF support.
 - **Rationale**: Keeping transcription in the same realtime session avoids new third-party services, minimizes latency (<150 ms target), and lets us reuse the existing session persistence codepath with only additive schema fields.
-- **Acceptance**: GIVEN a voice practice session is in progress with a connected microphone WHEN the candidate speaks THEN the timeline shows their transcript alongside the coach within 150 ms and the session JSON stores the utterance with role `candidate`.
+- **Acceptance**: GIVEN a voice practice session is in progress with a connected microphone WHEN the candidate speaks THEN the timeline shows their transcript alongside the coach within 150 ms and the session JSON stores the utterance with role `candidate`. GIVEN identical text content is produced by both roles WHEN messages are persisted THEN roles remain distinct (candidate vs coach) without cross-assignment. GIVEN the mic is blocked or permission denied WHEN starting a session THEN the UI surfaces a `muted` indicator and helpful guidance.
 
 ### MVP 2 — Coach Formatting Preservation
 - **Existing**: Coach feedback is flattened to plain paragraphs before storage/rendering, dropping Markdown structure provided by the model.
@@ -194,12 +195,15 @@ Outcome: Structured artifact for deliberate practice.
 - **Rationale**: Using WeasyPrint keeps the stack pure-Python, avoiding external services and satisfying the privacy constraint. BackgroundTasks prevents blocking the main request while staying simpler than introducing a new worker process for the MVP.
 - **Acceptance**: GIVEN a completed session with transcripts and evaluations WHEN the user requests an export THEN the API responds within 5 seconds with a downloadable PDF that includes questions, candidate/coach messages, feedback, and takeaways, and `pdf_exports` logs the generated artifact.
 
+#### Configuration
+- `OPENAI_INPUT_TRANSCRIPTION_MODEL` (optional): sets the OpenAI model used for server-side speech-to-text during realtime WebRTC sessions. Default: `gpt-4o-mini-transcribe`. Set to empty to disable server-side transcription (the browser fallback toggle may be used for local testing).
+
 ---
 
 ## Data Requirements
 
 ### Session Schema Additions
-- `voice_messages`: ordered list of `{ role, text, timestamp, stream? }`.
+- `voice_messages`: ordered list of `{ role, text, timestamp, question_index, stream? }`.
 - `voice_settings`: `{ voice_id, model_id, thinking_effort, verbosity }`.
 - `practice_history`: timestamps of completed runs and question lists.
 - `pdf_exports`: metadata on generated exports (optional caching).
@@ -258,10 +262,11 @@ Design Principles:
 3. Maintain accessibility (labels, keyboard navigation, ARIA roles).
 
 UI Requirements:
-1. Voice timeline component with role badges, timestamps, and preserved spacing.
+1. Voice timeline component with role badges, timestamps, preserved spacing, and a mic activity indicator.
 2. Model/voice selector panel with dropdowns and audio preview buttons.
 3. Practice Again modal/wizard offering reuse or add-questions path.
 4. PDF export CTA in summary section with progress feedback.
+5. Transcript export control within the voice section to download JSON/plain-text transcripts.
 
 Sample UX Flows:
 - Voice Review Flow: finish session → timeline updates → export PDF.
@@ -333,4 +338,5 @@ Document Control:
 - Author: Interview Practice App Team (Taylor Parsons)
 - Reviewers: Engineering, Design, Product
 - Approval Required: Yes (Product Lead)
-- Version History: v0.1 (2025-10-09) — Initial draft covering voice, practice, export, and customization enhancements.
+ - Version History: v0.1 (2025-10-09) — Initial draft covering voice, practice, export, and customization enhancements.
+ - Version History: v0.2 (2025-10-10) — Add server-side input transcription configuration, mic activity indicator, browser ASR fallback toggle, transcript export action, and role-fidelity acceptance.
