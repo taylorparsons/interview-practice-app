@@ -169,7 +169,9 @@ class InterviewPracticeAgent:
     
     async def evaluate_answer(self, question: str, answer: str, voice_transcript: Optional[str] = None, *, level: Optional[str] = None) -> Dict[str, Any]:
         """Evaluate candidate's answer to an interview question."""
-        level = level or "level_2"
+        # Respect the session-selected coach persona; default to level_1 (Help)
+        # when the caller does not provide an explicit level.
+        level = level or "level_1"
         system_prompt = build_dual_level_prompt(level)
         
         vt = (voice_transcript or "").strip()

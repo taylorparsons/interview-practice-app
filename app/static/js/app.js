@@ -20,6 +20,8 @@ function createInitialVoiceState() {
         suppressBrowserAsr: false,
         // Normalized text of the most recent finalized user message to avoid dupes
         lastUserFinalNormalized: '',
+        // Remember who last completed a turn so we can choose whether to
+        // start a new bubble or continue the previous one.
         lastFinalSpeaker: '',
         config: {
             // Default OFF: rely on server-side transcription unless explicitly enabled
@@ -420,6 +422,9 @@ function handleUserTranscriptChunk(transcript, options = {}) {
         // Prefer a purely structural check: if the last rendered entry is an existing
         // finalized 'You' bubble, continue appending text into it. This is resilient
         // to event ordering differences across browsers and realtime transports.
+        // Structural coalescing: if the last rendered entry is a finalized
+        // 'You' bubble, append text into it (covers both interim and final
+        // chunks), until the Coach speaks.
         const mayContinueUserBubble = !!(lastEntry && lastEntry.role === 'user' && !lastEntry.stream && voiceTranscript && voiceTranscript.lastElementChild);
         if (mayContinueUserBubble) {
             const p = voiceTranscript.lastElementChild.querySelector('p');
@@ -704,7 +709,13 @@ function finalizeAgentMessage() {
     const finalText = (active && active.text ? active.text : state.voice.transcriptBuffer).trim();
 
     if (active && active.element) {
-        active.element.textContent = finalText;
+        // Format coach text (STAR + I) into readable lines within the bubble
+        const html = renderCoachTranscriptHtml(finalText);
+        if (html) {
+            active.element.innerHTML = html;
+        } else {
+            active.element.textContent = finalText;
+        }
     }
     if (
         active &&
@@ -885,7 +896,15 @@ function handleVoiceEvent(event) {
             } else if ((role === 'assistant' || role === 'coach') && text && isFinal) {
                 // Avoid duplicating existing streaming updates
                 if (!state.voice.agentStream) {
-                    appendVoiceMessage('agent', text, { stream: false });
+                    const res = appendVoiceMessage('agent', text, { stream: false });
+                    // Apply formatting to the newly created agent bubble
+                    try {
+                        const el = res && res.wrapper && res.wrapper.querySelector('p');
+                        if (el) {
+                            const html = renderCoachTranscriptHtml(text);
+                            if (html) el.innerHTML = html;
+                        }
+                    } catch (_) {}
                     const idx = state.currentQuestionIndex;
                     const persistIdx = Number.isInteger(idx) ? idx : null;
                     persistVoiceMessage('agent', text, { questionIndex: persistIdx });
@@ -932,6 +951,25 @@ function handleVoiceEvent(event) {
             }
         }
     }
+}
+
+// Build simple HTML for coach transcript lines using STAR + I cues
+function renderCoachTranscriptHtml(text) {
+    if (!text) return '';
+    let t = String(text).trim();
+    // Trim generic preface up to first STAR+I label if present
+    try {
+        const firstIdx = t.search(/\b(Situation|Task|Action|Result|Impact)\s*:/i);
+        if (firstIdx > 0) t = t.slice(firstIdx);
+    } catch (_) {}
+    // Escape HTML then inject bold labels with line breaks
+    let html = escapeHtml(t);
+    html = html.replace(/\b(Situation|Task|Action|Result|Impact)\s*:/gi, function(_, label){
+        return (html.startsWith('<strong>') ? '' : '<br>') + '<strong>' + label.charAt(0).toUpperCase() + label.slice(1).toLowerCase() + ':</strong>';
+    });
+    // Ensure no leading <br>
+    html = html.replace(/^<br>/, '');
+    return html;
 }
 
 function hydrateVoiceMessagesFromSession(sessionData) {
@@ -1589,7 +1627,7 @@ async function initCoachLevelSelector() {
             const r = await fetch(`/session/${state.sessionId}`);
             if (r.ok) {
                 const data = await r.json();
-                const lvl = (data && data.coach_level) || 'level_2';
+                const lvl = (data && data.coach_level) || 'level_1';
                 coachLevelSelect.value = lvl;
             }
         }
@@ -1602,7 +1640,7 @@ async function initCoachLevelSelector() {
                 alert('Start or resume a session first.');
                 return;
             }
-            const lvl = coachLevelSelect.value || 'level_2';
+            const lvl = coachLevelSelect.value || 'level_1';
             try {
                 const r = await fetch(`/session/${state.sessionId}/coach-level`, {
                     method: 'PATCH',
@@ -2246,7 +2284,7 @@ function displayFeedback(evaluation) {
                     const coach = (data.voice_agent_text && (data.voice_agent_text[String(idx)] || data.voice_agent_text[idx])) || '';
                     if (coach) {
                         if (feedbackCoachVoiceWrap) feedbackCoachVoiceWrap.classList.remove('hidden');
-                        if (feedbackCoachVoice) feedbackCoachVoice.textContent = coach;
+                        displayCoachFeedback(coach);
                     } else if (feedbackCoachVoiceWrap) {
                         feedbackCoachVoiceWrap.classList.add('hidden');
                     }
@@ -2338,6 +2376,55 @@ function displayExampleAnswer(answer) {
     
     exampleAnswer.innerHTML = htmlContent;
     updateQuestionPosition();
+}
+
+// Coach feedback formatting similar to Example Answer
+function buildCoachFeedbackMarkdown(raw, question) {
+    if (!raw || typeof raw !== 'string') return '';
+    const text = raw.trim();
+    const parts = { situation: '', task: '', action: '', result: '', impact: '' };
+    try {
+        const re = /(\b\d+\.\s*)?(situation|task|action|result|impact)\s*:\s*(.*?)(?=(?:\b\d+\.\s*)?(?:situation|task|action|result|impact)\s*:|$)/gims;
+        let m;
+        while ((m = re.exec(text)) !== null) {
+            const key = (m[2] || '').toLowerCase();
+            const value = (m[3] || '').trim();
+            if (parts.hasOwnProperty(key)) parts[key] = value;
+        }
+    } catch (_) {}
+
+    let refined = '';
+    const rIdx = text.toLowerCase().indexOf("here's a refined version:");
+    if (rIdx >= 0) {
+        const after = text.slice(rIdx + "here's a refined version:".length);
+        const tipBreak = after.toLowerCase().indexOf("here's a tip:");
+        refined = (tipBreak >= 0 ? after.slice(0, tipBreak) : after).trim();
+    }
+    let tip = '';
+    const tIdx = text.toLowerCase().indexOf("here's a tip:");
+    if (tIdx >= 0) tip = text.slice(tIdx + "here's a tip:".length).trim();
+
+    let md = '## Coach Feedback\n\n';
+    if (question) md += `Question: ${question}\n\n`;
+    if (refined) md += refined + "\n\n";
+    ['situation','task','action','result','impact'].forEach((k) => {
+        if (parts[k]) {
+            const label = k.charAt(0).toUpperCase() + k.slice(1);
+            md += `**${label}:** ${parts[k]}\n`;
+        }
+    });
+    if (tip) md += `\n**Tip:** ${tip}\n`;
+    return md.trim();
+}
+
+function displayCoachFeedback(raw) {
+    if (!feedbackCoachVoice) return;
+    const q = state.questions && state.questions[state.currentQuestionIndex];
+    const md = buildCoachFeedbackMarkdown(raw, q || '');
+    if (!md) { feedbackCoachVoice.textContent = raw || ''; return; }
+    if (typeof showdown === 'undefined') { feedbackCoachVoice.textContent = md; return; }
+    const converter = new showdown.Converter();
+    feedbackCoachVoice.innerHTML = converter.makeHtml(md);
 }
 
 // Handle getting example answer
@@ -2541,7 +2628,14 @@ function buildPerQuestionCards() {
                 if (coach) {
                     const cf = document.createElement('details');
                     cf.className = 'mb-1';
-                    cf.innerHTML = `<summary class="cursor-pointer text-sm text-gray-700">Coach feedback (voice)</summary><pre class="mt-2 whitespace-pre-wrap text-sm text-gray-800">${escapeHtml(coach)}</pre>`;
+                    const md = buildCoachFeedbackMarkdown(coach, q || '');
+                    if (typeof showdown !== 'undefined' && md) {
+                        const conv = new showdown.Converter();
+                        const html = conv.makeHtml(md);
+                        cf.innerHTML = `<summary class="cursor-pointer text-sm text-gray-700">Coach feedback (voice)</summary><div class=\"mt-2 prose prose-indigo max-w-none text-sm text-gray-800\">${html}</div>`;
+                    } else {
+                        cf.innerHTML = `<summary class=\"cursor-pointer text-sm text-gray-700\">Coach feedback (voice)</summary><pre class=\"mt-2 whitespace-pre-wrap text-sm text-gray-800\">${escapeHtml(coach)}</pre>`;
+                    }
                     card.appendChild(cf);
                 }
 

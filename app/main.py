@@ -81,8 +81,11 @@ def _ensure_session_defaults(session: Dict[str, Any]) -> Dict[str, Any]:
         session["voice_messages"] = []
     if "voice_settings" not in session or session["voice_settings"] is None:
         session["voice_settings"] = {}
+    # Default the coaching persona to the easier (supportive) mode when
+    # missing. This value is persisted per-session and can be changed by the UI
+    # via PATCH /session/{id}/coach-level.
     if "coach_level" not in session or not session.get("coach_level"):
-        session["coach_level"] = "level_2"
+        session["coach_level"] = "level_1"
     return session
 
 
@@ -315,7 +318,8 @@ async def upload_documents(
         "voice_transcripts": {},
         "voice_agent_text": {},
         "voice_messages": [],
-        "coach_level": "level_2",
+        # Store the UI-selectable coach level; default to level_1 (Help).
+        "coach_level": "level_1",
     }
 
     _persist_session_state(session_id, session_data)
@@ -605,7 +609,8 @@ async def get_session_status(session_id: str):
         "voice_agent_text": session.get("voice_agent_text", {}),
         "voice_messages": session.get("voice_messages", []),
         "voice_settings": session.get("voice_settings", {}),
-        "coach_level": session.get("coach_level", "level_2"),
+        # Expose the current coach level to hydrate the UI selector.
+        "coach_level": session.get("coach_level", "level_1"),
     }
 
 
@@ -778,7 +783,8 @@ def _build_voice_instructions(session_id: str, session: Dict[str, Any]) -> str:
     resume_excerpt = _truncate_text(session.get("resume_text", ""), 1500)
     job_desc_excerpt = _truncate_text(session.get("job_desc_text", ""), 1500)
 
-    level = session.get("coach_level") or "level_2"
+    # Build the system prompt using the selected coach persona.
+    level = session.get("coach_level") or "level_1"
     base_prompt = build_dual_level_prompt(level)
 
     instructions = f"""

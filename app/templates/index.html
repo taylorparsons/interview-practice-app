@@ -144,8 +144,8 @@
                             <div class="inline-flex items-center gap-2">
                                 <label for="coach-level-select" class="text-gray-600">Coaching Level</label>
                                 <select id="coach-level-select" class="border border-gray-300 rounded-md text-xs py-1 px-2">
-                                    <option value="level_1">Help</option>
-                                    <option value="level_2" selected>Strict</option>
+                                    <option value="level_1" selected>Help</option>
+                                    <option value="level_2">Strict</option>
                                 </select>
                                 <button id="coach-level-save" class="py-1 px-2 border border-indigo-300 rounded-md bg-indigo-50 text-indigo-700 hover:bg-indigo-100">Save</button>
                             </div>
@@ -223,7 +223,7 @@
                         </details>
                         <details id="feedback-coach-voice-wrap" class="p-4 bg-gray-50 rounded-lg hidden">
                             <summary class="cursor-pointer font-medium text-gray-700 mb-2">Coach Feedback (Voice)</summary>
-                            <pre id="feedback-coach-voice" class="mt-2 whitespace-pre-wrap text-sm text-gray-800"></pre>
+                            <div id="feedback-coach-voice" class="mt-2 prose prose-indigo max-w-none text-sm text-gray-800"></div>
                         </details>
                         <details id="feedback-typed-answer-wrap" class="p-4 bg-gray-50 rounded-lg hidden">
                             <summary class="cursor-pointer font-medium text-gray-700 mb-2">Your Typed Answer</summary>
