@@ -27,6 +27,12 @@
 - Naming: files `test_*.py`; functions `test_*`.
 - Run tests: `pytest -q` (use `-k <pattern>` to filter).
 
+### Policy: MVP Features Require Tests
+- For every MVP feature added or changed, add at least one automated test that exercises the expected behavior and acceptance criteria.
+- Favor API-level tests (FastAPI TestClient) that simulate realistic usage and avoid external network calls by stubbing clients where needed.
+- Extend existing suites rather than creating ad-hoc scripts; keep tests fast and deterministic.
+- Use `-k` filters for focused iteration and ensure the full suite passes before merging to `main`.
+
 ## Commit & Pull Request Guidelines
 - Commits: concise, imperative subject (≤72 chars). Example: `feat: add question generation endpoint`.
 - Include rationale and scope in body when needed; group related changes.

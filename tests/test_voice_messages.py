@@ -161,3 +161,25 @@ def test_identical_texts_do_not_cross_roles(session_factory, client):
     assert entries[0]["text"] == prompt_text
     assert entries[1]["role"] == "coach"
     assert entries[1]["text"] == prompt_text
+
+
+def test_voice_messages_include_question_index_in_session_payload(session_factory, client):
+    session_id = session_factory()
+
+    # Append candidate and coach messages tied to a specific question index
+    qidx = 5
+    client.post(
+        f"/session/{session_id}/voice-messages",
+        json={"role": "user", "text": "My answer for q5", "question_index": qidx},
+    )
+    client.post(
+        f"/session/{session_id}/voice-messages",
+        json={"role": "agent", "text": "Coach feedback for q5", "question_index": qidx},
+    )
+
+    payload = client.get(f"/session/{session_id}").json()
+    msgs = [m for m in payload["voice_messages"] if m.get("question_index") == qidx]
+
+    assert len(msgs) == 2
+    assert all("question_index" in m for m in msgs)
+    assert msgs[0]["question_index"] == qidx and msgs[1]["question_index"] == qidx

@@ -171,3 +171,31 @@ def test_voice_session_turn_detection_none_sets_type_none(
     payload = captured.get("json")
     assert payload is not None
     assert payload.get("turn_detection") == {"type": "none"}
+
+
+def test_voice_session_server_vad_parses_thresholds(
+    session_factory, client, monkeypatch
+):
+    session_id = session_factory()
+
+    monkeypatch.setattr(main, "OPENAI_API_KEY", "test_key")
+    monkeypatch.setattr(main, "OPENAI_TURN_DETECTION", "server_vad")
+    # Provide string inputs to validate parsing into float/int types
+    monkeypatch.setattr(main, "OPENAI_TURN_THRESHOLD", "0.7")
+    monkeypatch.setattr(main, "OPENAI_TURN_PREFIX_MS", "250")
+    monkeypatch.setattr(main, "OPENAI_TURN_SILENCE_MS", "600")
+
+    captured = {}
+    monkeypatch.setattr(main.httpx, "AsyncClient", _fake_async_client_factory(captured))
+
+    resp = client.post("/voice/session", json={"session_id": session_id})
+    assert resp.status_code == 200
+
+    payload = captured.get("json")
+    assert payload is not None
+    assert payload.get("turn_detection") == {
+        "type": "server_vad",
+        "threshold": 0.7,
+        "prefix_padding_ms": 250,
+        "silence_duration_ms": 600,
+    }
