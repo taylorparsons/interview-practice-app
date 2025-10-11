@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# Lightweight guard: require at least one comment added when code is modified.
+#
+# Rationale
+# - We want code changes to carry appropriate inline documentation.
+# - This hook looks at staged diffs and blocks commits that add code but
+#   don't add any comment lines in the same commit.
+# - Bypass: set BYPASS_COMMENT_CHECK=1 in your env for emergencies.
+
+set -euo pipefail
+
+if [[ "${BYPASS_COMMENT_CHECK:-}" == "1" ]]; then
+  exit 0
+fi
+
+# Collect the staged diff for tracked files with common code extensions.
+mapfile -t files < <(git diff --cached --name-only --diff-filter=ACMR | grep -E '\.(py|js|ts|tsx|jsx|html|css)$' || true)
+
+if [[ ${#files[@]} -eq 0 ]]; then
+  exit 0
+fi
+
+# Count added lines and added comment lines across the commit.
+added_total=0
+added_comment=0
+
+for f in "${files[@]}"; do
+  # Unified diff with zero context; only additions start with leading '+'
+  while IFS= read -r line; do
+    # Only care about actual added content, ignore file headers
+    [[ "$line" =~ ^\+\+\+ ]] && continue
+    if [[ "$line" =~ ^\+ ]]; then
+      added_total=$((added_total+1))
+      # Heuristics for comments across languages
+      if   [[ "$f" =~ \.py$   && "$line" =~ ^\+[[:space:]]*# ]]; then added_comment=$((added_comment+1))
+      elif [[ "$f" =~ \.js$|\.jsx$|\.ts$|\.tsx$ ]] && [[ "$line" =~ ^\+[[:space:]]*//|^\+[[:space:]]*/\* ]]; then added_comment=$((added_comment+1))
+      elif [[ "$f" =~ \.html$ ]] && [[ "$line" =~ ^\+[[:space:]]*<!-- ]]; then added_comment=$((added_comment+1))
+      elif [[ "$f" =~ \.css$  ]] && [[ "$line" =~ ^\+[[:space:]]*/\* ]]; then added_comment=$((added_comment+1))
+      fi
+    fi
+  done < <(git diff --cached -U0 -- "$f")
+done
+
+# If we added code but no comment lines, block the commit with guidance.
+if [[ $added_total -gt 0 && $added_comment -eq 0 ]]; then
+  cat >&2 <<EOF
+pre-commit: No comment lines were added with your code changes.
+
+Add a brief inline comment explaining the change (e.g., '# why', '// rationale')
+or export BYPASS_COMMENT_CHECK=1 to override this guard for this commit only.
+
+Files checked:
+  ${files[*]}
+EOF
+  exit 1
+fi
+
+exit 0
+

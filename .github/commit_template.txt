@@ -1,0 +1,15 @@
+# Summary
+# One sentence, imperative mood, <= 72 chars.
+
+# Rationale
+# Why this change is needed and what problem it solves.
+
+# Impact
+# User‑visible behavior, risks, migrations, or ops notes.
+
+# Testing
+# How you validated the change (commands, tests, screenshots).
+
+# Notes
+# Links, follow‑ups, deprecations, or rollout plan.
+

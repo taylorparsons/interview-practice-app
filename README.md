@@ -111,6 +111,8 @@ Notes
 ## Helper Scripts
 - `./run_voice.sh`: Boots the FastAPI server with realtime voice defaults. Add `--no-reload` to disable auto-reload or `--python 3.11` to prefer a specific Python version.
 - `./test.sh`: Runs the test suite with `pytest -q`. Use `--health` to ping the running server (`http://localhost:8000` by default) after tests, or override the health-check target with `--url <base_url>`.
+- `scripts/codex_up.sh`: One‑step venv + install + start/tests (Codex‑friendly).
+- `scripts/install_git_conventions.sh`: Installs a commit template and a pre‑commit guard.
 
 ## Realtime Voice Interviews
 - Upload your resume and job description to start a session, then click **Start Voice Session** to open a WebRTC call with the `gpt-realtime-mini-2025-10-06` coach.
@@ -234,3 +236,19 @@ Taylor Parsons - taylor.parsons@gmail.com
 ### 6. Resume-Based Answering
 - **Test Scenario**: Test the app's ability to answer questions using the user's resume as a factual source.
 - **Expected Outcome**: The app should generate accurate responses based on the resume, demonstrating potential answers to interview questions.
+### Git Conventions (Commit Template + Pre‑Commit Guard)
+Install once per clone:
+
+```bash
+scripts/install_git_conventions.sh
+```
+
+What you get:
+- Commit template at `.github/commit_template.txt` prompting for Summary, Rationale, Impact, Testing, Notes.
+- Pre‑commit hook that blocks commits that add code without adding at least one comment line in the diff (simple heuristic across `.py`, `.js/.ts/.tsx/.jsx`, `.html`, `.css`).
+
+Bypass (emergencies only):
+
+```bash
+BYPASS_COMMENT_CHECK=1 git commit -m "hotfix: ..."
+```
