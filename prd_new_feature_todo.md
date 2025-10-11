@@ -52,7 +52,8 @@ Checklist derived from the technical design in `prd_new_features.md`. Each secti
 - [x] Backend: update session start/realtime handshake to send the selected `voice_id` from `voice_settings`.
 - [x] Backend: add `PATCH /session/{id}/voice` to persist `voice_id` with catalog validation.
 - [x] Frontend: add selector UI with preview playback (local audio element) and save flow tied to the new endpoint.
-- [ ] Frontend: cache preview clips client-side and guard against starting a new prompt while previewing.
+- [x] Frontend: preview UX improvements — show loading spinner, disable Voice/Start buttons during preview to prevent mid-call changes, auto-restore state on play/end/error.
+- [x] Preview caching: implement server-side preview synthesis and caching via `GET /voices/preview/{id}`. First request synthesizes an MP3 and writes to `app/static/voices/{id}-preview.mp3`; subsequent requests serve the cached file (plus normal browser HTTP caching).
 - [x] QA: add tests for catalog endpoint, voice persistence, and usage in realtime session payload; reject unknown voice IDs.
 - [ ] Telemetry: log voice selection frequency for future catalog tuning.
 
