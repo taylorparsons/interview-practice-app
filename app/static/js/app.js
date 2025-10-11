@@ -20,6 +20,7 @@ function createInitialVoiceState() {
         suppressBrowserAsr: false,
         // Normalized text of the most recent finalized user message to avoid dupes
         lastUserFinalNormalized: '',
+        lastFinalSpeaker: '',
         config: {
             // Default OFF: rely on server-side transcription unless explicitly enabled
             useBrowserAsr: false,
@@ -413,6 +414,25 @@ function handleUserTranscriptChunk(transcript, options = {}) {
             confidence: typeof options.confidence === 'number' ? options.confidence : undefined,
             source: options.source || undefined,
         };
+        // If this is a finalized user chunk and the last finalized speaker was the user,
+        // coalesce into the previous user bubble for display.
+        const lastEntry = state.voice.messages && state.voice.messages[state.voice.messages.length - 1];
+        const canCoalesce = finalize && state.voice.lastFinalSpeaker === 'user' && lastEntry && lastEntry.role === 'user' && !lastEntry.stream;
+        if (canCoalesce && voiceTranscript && voiceTranscript.lastElementChild) {
+            const p = voiceTranscript.lastElementChild.querySelector('p');
+            if (p) {
+                const joined = (lastEntry.text ? (lastEntry.text + '\n' + text) : text).trim();
+                p.textContent = joined;
+                lastEntry.text = joined;
+                if (Number.isInteger(questionIndex)) {
+                    state.voice.transcriptsByIndex[questionIndex] = joined;
+                }
+                const persistIdx = Number.isInteger(questionIndex) ? questionIndex : null;
+                persistVoiceMessage('user', text, { questionIndex: persistIdx });
+                state.voice.lastFinalSpeaker = 'user';
+                return;
+            }
+        }
         const result = appendVoiceMessage('user', text, { stream: !finalize, meta });
         if (!result) {
             return;
@@ -505,6 +525,7 @@ function handleUserTranscriptChunk(transcript, options = {}) {
 
         state.voice.userStream = null;
         state.voice.lastUserFinalNormalized = currentNorm;
+        state.voice.lastFinalSpeaker = 'user';
     }
 }
 
@@ -698,6 +719,7 @@ function finalizeAgentMessage() {
 
     state.voice.agentStream = null;
     state.voice.transcriptBuffer = '';
+    if (state.voice) { state.voice.lastFinalSpeaker = 'agent'; }
 }
 
 function handleVoiceEvent(event) {
@@ -853,6 +875,7 @@ function handleVoiceEvent(event) {
                     const idx = state.currentQuestionIndex;
                     const persistIdx = Number.isInteger(idx) ? idx : null;
                     persistVoiceMessage('agent', text, { questionIndex: persistIdx });
+                    if (state.voice) { state.voice.lastFinalSpeaker = 'agent'; }
                 }
             }
             break;
@@ -918,7 +941,22 @@ function hydrateVoiceMessagesFromSession(sessionData) {
         if (!msg || !msg.text) {
             return;
         }
-        const result = appendVoiceMessage(msg.role || 'system', msg.text, { stream: !!msg.stream });
+        const role = (msg.role || 'system');
+        const displayRole = voiceRoleToDisplay[role] || role;
+        const last = state.voice.messages && state.voice.messages[state.voice.messages.length - 1];
+        if (displayRole === 'user' && last && last.role === 'user' && !msg.stream) {
+            const wrapper = voiceTranscript && voiceTranscript.lastElementChild;
+            if (wrapper) {
+                const p = wrapper.querySelector('p');
+                if (p) {
+                    const joined = (last.text ? (last.text + '\n' + msg.text) : msg.text).trim();
+                    p.textContent = joined;
+                    last.text = joined;
+                    return;
+                }
+            }
+        }
+        const result = appendVoiceMessage(role, msg.text, { stream: !!msg.stream });
         if (result && state.voice.messages[result.entryIndex]) {
             if (msg.timestamp) {
                 state.voice.messages[result.entryIndex].timestamp = msg.timestamp;
