@@ -80,6 +80,34 @@ Update `.env` with your token (and override realtime model/voice if desired).
 The script creates/activates the virtual environment (if missing), installs dependencies, confirms realtime voice defaults, and starts the development server with auto-reload by default.
 When the UI loads, upload your resume and either attach a job description file or paste its text directly into the job description field.
 
+### One‑Step Bootstrap (Codex‑friendly)
+For a single script that sets up a virtual environment, installs dependencies, and either starts the dev server or runs tests, use `scripts/codex_up.sh`.
+
+Examples
+```bash
+# Install deps into venv and start the server at http://localhost:8000
+scripts/codex_up.sh --start
+
+# Create venv and install only (no server)
+scripts/codex_up.sh --install
+
+# Run the test suite
+scripts/codex_up.sh --tests
+
+# Pre‑generate and cache all voice preview MP3s (requires OPENAI_API_KEY)
+scripts/codex_up.sh --preseed-previews
+```
+
+Options and env vars
+- `--python 3.11` selects a specific Python version if available.
+- `--no-reload` disables uvicorn file watching.
+- `HOST` and `PORT` control bind address (defaults: `0.0.0.0:8000`).
+- `PYTHON_BIN` can point to an explicit interpreter path.
+
+Notes
+- Voice features (realtime + previews) require `OPENAI_API_KEY` in `.env`. If missing, the server still starts but voice endpoints will return 5xx when invoked.
+- Use `scripts/codex_up.sh` in constrained environments or CI. Use `run_voice.sh` for a stricter voice-first workflow that enforces the API key.
+
 ## Helper Scripts
 - `./run_voice.sh`: Boots the FastAPI server with realtime voice defaults. Add `--no-reload` to disable auto-reload or `--python 3.11` to prefer a specific Python version.
 - `./test.sh`: Runs the test suite with `pytest -q`. Use `--health` to ping the running server (`http://localhost:8000` by default) after tests, or override the health-check target with `--url <base_url>`.
