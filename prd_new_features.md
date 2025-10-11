@@ -185,9 +185,13 @@ Outcome: Structured artifact for deliberate practice.
 
 ### MVP 5 — Voice Selection with Preview
 - **Existing**: Voice ID is fixed in config and shared across users.
-- **Additions**: Define a catalog (`voice_catalog.json`) storing voice IDs, labels, and preview URLs. Serve it via `GET /voices`. Session settings persist the chosen `voice_id`; the realtime agent includes it on stream creation. Frontend fetches the catalog, caches short preview clips locally, and plays them via the `<audio>` element before committing changes.
-- **Rationale**: Centralizing voice metadata keeps configuration server-driven while limiting client logic to presentation. Short previews avoid hitting the realtime API during selection and create a more responsive UX.
-- **Acceptance**: GIVEN the user opens the voice selector WHEN they preview a voice and confirm their choice THEN the preview plays locally without affecting the active session, and subsequent prompts use the newly selected `voice_id` stored in `voice_settings`.
+- **Additions**:
+  - Catalog: `voice_catalog.json` with `{ id, label, preview_url }`, served via `GET /voices`.
+  - Session setting: `voice_settings.voice_id`; included in realtime session creation so new prompts use the selected voice.
+  - Preview endpoint: `GET /voices/preview/{voice_id}`. If `app/static/voices/{id}-preview.mp3` exists, serve it directly. Otherwise synthesize a short sample via OpenAI TTS (`gpt-4o-mini-tts`), cache to disk, and return `audio/mpeg`.
+  - UI: dropdown fed by `/voices`, Preview button plays `preview_url` in an `<audio>` element, shows a loading spinner, disables Start/Voice controls during generation/play, restores on end/error, and does not affect the current live session.
+- **Rationale**: Server-side preview caching guarantees consistent previews and eliminates repeated TTS calls. The UI stays simple and responsive while avoiding mid-session voice changes.
+- **Acceptance**: GIVEN the user opens the voice selector WHEN they click Preview THEN audio plays and controls show a loading state without interrupting any active session; WHEN they click Save THEN `/session/{id}/voice` persists the `voice_id` and the next session start uses it.
 
 ### MVP 6 — PDF Study Guide Export
 - **Existing**: No export path; the server only serves HTML/timeline responses.

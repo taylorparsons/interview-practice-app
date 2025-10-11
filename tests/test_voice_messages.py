@@ -183,3 +183,107 @@ def test_voice_messages_include_question_index_in_session_payload(session_factor
     assert len(msgs) == 2
     assert all("question_index" in m for m in msgs)
     assert msgs[0]["question_index"] == qidx and msgs[1]["question_index"] == qidx
+
+
+def test_role_synonyms_are_normalized(session_factory, client):
+    """Posting assistant/agent should normalize to coach; candidate stays candidate."""
+    session_id = session_factory()
+
+    # Post as 'assistant' (should become coach)
+    r1 = client.post(
+        f"/session/{session_id}/voice-messages",
+        json={"role": "assistant", "text": "Coach guidance.", "question_index": 1},
+    )
+    assert r1.status_code == 200
+
+    # Post as 'candidate'
+    r2 = client.post(
+        f"/session/{session_id}/voice-messages",
+        json={"role": "candidate", "text": "My answer.", "question_index": 1},
+    )
+    assert r2.status_code == 200
+
+    data = client.get(f"/session/{session_id}").json()
+    roles = [m["role"] for m in data["voice_messages"] if m.get("question_index") == 1]
+    assert set(roles) == {"coach", "candidate"}
+    assert data["voice_agent_text"]["1"] == "Coach guidance."
+    assert data["voice_transcripts"]["1"] == "My answer."
+
+
+def test_transcript_and_coach_text_aggregate_across_messages(session_factory, client):
+    session_id = session_factory()
+
+    # Two user messages for same index
+    client.post(
+        f"/session/{session_id}/voice-messages",
+        json={"role": "user", "text": "Part A", "question_index": 0},
+    )
+    client.post(
+        f"/session/{session_id}/voice-messages",
+        json={"role": "user", "text": "Part B", "question_index": 0},
+    )
+
+    # Two coach messages for same index
+    client.post(
+        f"/session/{session_id}/voice-messages",
+        json={"role": "agent", "text": "Coach A", "question_index": 0},
+    )
+    client.post(
+        f"/session/{session_id}/voice-messages",
+        json={"role": "agent", "text": "Coach B", "question_index": 0},
+    )
+
+    data = client.get(f"/session/{session_id}").json()
+    assert data["voice_transcripts"]["0"] == "Part A\nPart B"
+    assert data["voice_agent_text"]["0"] == "Coach A\nCoach B"
+
+
+def test_stream_flag_persists_on_entries(session_factory, client):
+    session_id = session_factory()
+    client.post(
+        f"/session/{session_id}/voice-messages",
+        json={"role": "user", "text": "interim", "question_index": 2, "stream": True},
+    )
+    client.post(
+        f"/session/{session_id}/voice-messages",
+        json={"role": "user", "text": "final", "question_index": 2, "stream": False},
+    )
+    data = client.get(f"/session/{session_id}").json()
+    entries = [m for m in data["voice_messages"] if m.get("question_index") == 2]
+    assert entries[0]["text"] == "interim" and entries[0].get("stream") is True
+    assert entries[1]["text"] == "final" and entries[1].get("stream") is False
+
+
+def test_legacy_session_backfills_missing_voice_fields(client):
+    """Older sessions without voice keys are backfilled with defaults on read."""
+    import uuid
+    sid = str(uuid.uuid4())
+    now = "2024-01-01T00:00:00Z"
+    legacy_payload = {
+        "resume_path": "uploads/resume.txt",
+        "job_desc_path": "uploads/job.txt",
+        "resume_text": "Sample",
+        "job_desc_text": "Sample JD",
+        "name": "legacy",
+        "questions": ["Tell me about yourself."],
+        "answers": [],
+        "evaluations": [],
+        "agent": None,
+        "current_question_index": 0,
+        "created_at": now,
+        "updated_at": now,
+        # Missing or None voice fields
+        "voice_transcripts": None,
+        "voice_agent_text": None,
+        "voice_messages": None,
+    }
+    # Persist directly via internal helper
+    from app.main import _persist_session_state
+    _persist_session_state(sid, legacy_payload)
+
+    res = client.get(f"/session/{sid}")
+    assert res.status_code == 200
+    payload = res.json()
+    assert isinstance(payload.get("voice_transcripts"), dict)
+    assert isinstance(payload.get("voice_agent_text"), dict)
+    assert isinstance(payload.get("voice_messages"), list)

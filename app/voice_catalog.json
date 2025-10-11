@@ -1,12 +1,52 @@
 [
-  { "id": "alloy",   "label": "Alloy",   "preview_url": "/voices/preview/alloy" },
-  { "id": "ash",     "label": "Ash",     "preview_url": "/voices/preview/ash" },
-  { "id": "ballad",  "label": "Ballad",  "preview_url": "/voices/preview/ballad" },
-  { "id": "cedar",   "label": "Cedar",   "preview_url": "/voices/preview/cedar" },
-  { "id": "coral",   "label": "Coral",   "preview_url": "/voices/preview/coral" },
-  { "id": "echo",    "label": "Echo",    "preview_url": "/voices/preview/echo" },
-  { "id": "marin",   "label": "Marin",   "preview_url": "/voices/preview/marin" },
-  { "id": "sage",    "label": "Sage",    "preview_url": "/voices/preview/sage" },
-  { "id": "shimmer", "label": "Shimmer", "preview_url": "/voices/preview/shimmer" },
-  { "id": "verse",   "label": "Verse",   "preview_url": "/voices/preview/verse" }
+  {
+    "id": "alloy",
+    "label": "Alloy",
+    "preview_url": "/voices/preview/alloy"
+  },
+  {
+    "id": "ash",
+    "label": "Ash",
+    "preview_url": "/voices/preview/ash"
+  },
+  {
+    "id": "ballad",
+    "label": "Ballad",
+    "preview_url": "/voices/preview/ballad"
+  },
+  {
+    "id": "cedar",
+    "label": "Cedar",
+    "preview_url": "/voices/preview/cedar"
+  },
+  {
+    "id": "coral",
+    "label": "Coral",
+    "preview_url": "/voices/preview/coral"
+  },
+  {
+    "id": "echo",
+    "label": "Echo",
+    "preview_url": "/voices/preview/echo"
+  },
+  {
+    "id": "marin",
+    "label": "Marin",
+    "preview_url": "/voices/preview/marin"
+  },
+  {
+    "id": "sage",
+    "label": "Sage",
+    "preview_url": "/voices/preview/sage"
+  },
+  {
+    "id": "shimmer",
+    "label": "Shimmer",
+    "preview_url": "/voices/preview/shimmer"
+  },
+  {
+    "id": "verse",
+    "label": "Verse",
+    "preview_url": "/voices/preview/verse"
+  }
 ]

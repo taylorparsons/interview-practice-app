@@ -14,8 +14,15 @@ function createInitialVoiceState() {
         userStream: null,
         activityMonitor: null,
         browserAsrActive: false,
+        // True while the agent is speaking; used to suppress browser ASR echo
+        agentSpeaking: false,
+        // When true, browser ASR results are ignored (set during agent audio)
+        suppressBrowserAsr: false,
+        // Normalized text of the most recent finalized user message to avoid dupes
+        lastUserFinalNormalized: '',
         config: {
-            useBrowserAsr: true,
+            // Default OFF: rely on server-side transcription unless explicitly enabled
+            useBrowserAsr: false,
             showMetadata: false,
         },
     };
@@ -424,6 +431,28 @@ function handleUserTranscriptChunk(transcript, options = {}) {
             return;
         }
 
+        // Deduplicate against the most recent finalized 'You' message (ignore case/punctuation)
+        const normalize = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+        const currentNorm = normalize(finalText);
+        try {
+            for (let i = state.voice.messages.length - 1; i >= 0; i -= 1) {
+                const m = state.voice.messages[i];
+                if (m && m.role === 'user' && !m.stream && typeof m.text === 'string' && m.text.trim()) {
+                    const lastNorm = normalize(m.text);
+                    if (lastNorm === currentNorm) {
+                        // Update index snapshot but skip duplicate append/persist
+                        const qi = state.currentQuestionIndex;
+                        if (Number.isInteger(qi)) {
+                            state.voice.transcriptsByIndex[qi] = finalText;
+                        }
+                        state.voice.userStream = null;
+                        return;
+                    }
+                    break;
+                }
+            }
+        } catch (_) {}
+
         if (active.element) {
             active.element.textContent = finalText;
         }
@@ -451,6 +480,7 @@ function handleUserTranscriptChunk(transcript, options = {}) {
         persistVoiceMessage('user', finalText, { questionIndex: persistIdx });
 
         state.voice.userStream = null;
+        state.voice.lastUserFinalNormalized = currentNorm;
     }
 }
 
@@ -692,17 +722,30 @@ function handleVoiceEvent(event) {
             if (part.type === 'audio' && typeof part.transcript === 'string') {
                 appendAgentDelta(part.transcript);
                 finalizeAgentMessage();
+                // Agent finished a spoken segment; allow browser ASR again
+                if (state.voice) {
+                    state.voice.agentSpeaking = false;
+                    state.voice.suppressBrowserAsr = false;
+                }
             }
             break;
         }
         case 'output_audio_buffer.started': {
             state.voice.transcriptBuffer = '';
             state.voice.agentStream = null;
+            if (state.voice) {
+                state.voice.agentSpeaking = true;
+                state.voice.suppressBrowserAsr = true;
+            }
             break;
         }
         case 'response.output_text.done':
         case 'response.completed': {
             finalizeAgentMessage();
+            if (state.voice) {
+                state.voice.agentSpeaking = false;
+                state.voice.suppressBrowserAsr = false;
+            }
             break;
         }
         case 'response.created': {
@@ -919,7 +962,15 @@ async function startVoiceInterview() {
 
         dataChannel.onopen = () => {
             updateVoiceStatus('Live', 'live');
-            startBrowserAsrIfAvailable();
+            // Only start browser ASR if explicitly enabled and not suppressed
+            if (
+                state.voice &&
+                state.voice.config &&
+                state.voice.config.useBrowserAsr &&
+                !state.voice.suppressBrowserAsr
+            ) {
+                startBrowserAsrIfAvailable();
+            }
             const openingQuestion =
                 state.questions[state.currentQuestionIndex] ||
                 state.questions[0] ||
@@ -1083,11 +1134,11 @@ function setupSpeechRecognition() {
         if (finalTranscript) {
             // Append to textarea instead of replacing
             answerInput.value += ' ' + finalTranscript;
-            if (state.voice && state.voice.config && state.voice.config.useBrowserAsr) {
+            if (state.voice && state.voice.config && state.voice.config.useBrowserAsr && !state.voice.suppressBrowserAsr) {
                 try { handleUserTranscriptChunk(finalTranscript, { finalize: true, source: 'browser_asr', confidence: finalConfidence }); } catch (_) {}
             }
         } else if (interimTranscript) {
-            if (state.voice && state.voice.config && state.voice.config.useBrowserAsr) {
+            if (state.voice && state.voice.config && state.voice.config.useBrowserAsr && !state.voice.suppressBrowserAsr) {
                 try { handleUserTranscriptChunk(interimTranscript, { finalize: false, source: 'browser_asr' }); } catch (_) {}
             }
         }
@@ -1109,7 +1160,7 @@ function setupSpeechRecognition() {
         state.isRecording = false;
         state.voice.browserAsrActive = false;
         // When voice session is live, attempt to restart for continuous capture
-        if (state.voice && state.voice.peer && state.voice.dataChannel && state.voice.config && state.voice.config.useBrowserAsr) {
+        if (state.voice && state.voice.peer && state.voice.dataChannel && state.voice.config && state.voice.config.useBrowserAsr && !state.voice.suppressBrowserAsr) {
             try { state.recognition.start(); state.isRecording = true; state.voice.browserAsrActive = true; } catch (_) {}
         }
     };
