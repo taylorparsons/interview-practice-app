@@ -1667,7 +1667,31 @@ function exportFullTranscript() {
     fetch(`/session/${state.sessionId}`)
         .then(r => (r.ok ? r.json() : Promise.reject(new Error('Failed to load session'))))
         .then(data => {
-            const msgs = Array.isArray(data.voice_messages) ? data.voice_messages : [];
+            // Base conversation from persisted voice_messages
+            const msgs = Array.isArray(data.voice_messages) ? data.voice_messages.slice() : [];
+
+            // Some users report exports missing 'You' lines when only the
+            // per-question transcript (voice_transcripts) was captured. As a
+            // safety net, inject a synthetic 'You' entry for any question index
+            // that has a transcript but no candidate message persisted.
+            try {
+                const transcripts = (data && data.voice_transcripts) || {};
+                const hasCandidateByIdx = new Set(
+                    msgs
+                        .filter(m => m && (m.role === 'candidate' || m.role === 'user') && typeof m.question_index === 'number')
+                        .map(m => m.question_index)
+                );
+                Object.keys(transcripts).forEach(k => {
+                    const idx = Number(k);
+                    const text = (transcripts[k] || '').trim();
+                    if (!text) return;
+                    if (!hasCandidateByIdx.has(idx)) {
+                        msgs.push({ role: 'candidate', text, question_index: idx, timestamp: '' });
+                    }
+                });
+            } catch (_) { /* ignore fallback wiring issues */ }
+
+            // Format a simple, readable text export
             const lines = [];
             msgs.forEach(m => {
                 const role = (m.role === 'coach' || m.role === 'agent') ? 'Coach' : (m.role === 'candidate' || m.role === 'user') ? 'You' : 'System';
