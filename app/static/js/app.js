@@ -120,6 +120,9 @@ const voiceSelect = document.getElementById('voice-select');
 const voicePreviewBtn = document.getElementById('voice-preview');
 const voiceSaveBtn = document.getElementById('voice-save');
 const voicePreviewAudio = document.getElementById('voice-preview-audio');
+// Coaching level controls
+const coachLevelSelect = document.getElementById('coach-level-select');
+const coachLevelSaveBtn = document.getElementById('coach-level-save');
 
 const voiceStatusClasses = {
     idle: 'text-gray-500',
@@ -1320,6 +1323,8 @@ document.addEventListener('DOMContentLoaded', () => {
     refreshSessionsList(state.sessionId);
         refreshSwitcherList();
     initVoiceSelector();
+    // Initialize coach level select/save (loads current level on active session)
+    (async () => { try { await initCoachLevelSelector(); } catch (_) {} })();
     // Initialize voice settings toggles
     if (toggleBrowserAsr) {
         toggleBrowserAsr.checked = !!(state.voice && state.voice.config && state.voice.config.useBrowserAsr);
@@ -1522,6 +1527,45 @@ async function initVoiceSelector() {
         }
     } catch (err) {
         console.warn('Voice catalog unavailable:', err);
+    }
+}
+
+async function initCoachLevelSelector() {
+    if (!coachLevelSelect) return;
+    try {
+        if (state.sessionId) {
+            const r = await fetch(`/session/${state.sessionId}`);
+            if (r.ok) {
+                const data = await r.json();
+                const lvl = (data && data.coach_level) || 'level_2';
+                coachLevelSelect.value = lvl;
+            }
+        }
+    } catch (_) {}
+
+    if (coachLevelSaveBtn) {
+        coachLevelSaveBtn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            if (!state.sessionId) {
+                alert('Start or resume a session first.');
+                return;
+            }
+            const lvl = coachLevelSelect.value || 'level_2';
+            try {
+                const r = await fetch(`/session/${state.sessionId}/coach-level`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ level: lvl })
+                });
+                if (!r.ok) {
+                    const t = await r.text();
+                    throw new Error(t || 'Failed to save level');
+                }
+                alert('Coaching level saved. New prompts will use this level.');
+            } catch (err) {
+                alert(err.message || 'Unable to save level');
+            }
+        });
     }
 }
 

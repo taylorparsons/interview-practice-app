@@ -25,6 +25,7 @@ from app.config import (
 )
 from app.utils.document_processor import allowed_file, save_uploaded_file, save_text_as_file, process_documents
 from app.models.interview_agent import InterviewPracticeAgent, get_base_coach_prompt
+from app.models.prompts import build_dual_level_prompt
 from app.logging_config import setup_logging
 from app.logging_context import session_id_var
 from app.middleware.request_logging import RequestLoggingMiddleware
@@ -80,6 +81,8 @@ def _ensure_session_defaults(session: Dict[str, Any]) -> Dict[str, Any]:
         session["voice_messages"] = []
     if "voice_settings" not in session or session["voice_settings"] is None:
         session["voice_settings"] = {}
+    if "coach_level" not in session or not session.get("coach_level"):
+        session["coach_level"] = "level_2"
     return session
 
 
@@ -245,6 +248,10 @@ class VoiceMessagePayload(BaseModel):
     question_index: Optional[int] = None
 
 
+class SetCoachLevelRequest(BaseModel):
+    level: str
+
+
 # Routes
 @app.get("/", response_class=HTMLResponse)
 async def get_index(request: Request):
@@ -308,6 +315,7 @@ async def upload_documents(
         "voice_transcripts": {},
         "voice_agent_text": {},
         "voice_messages": [],
+        "coach_level": "level_2",
     }
 
     _persist_session_state(session_id, session_data)
@@ -404,7 +412,12 @@ async def evaluate_answer(request: EvaluateAnswerRequest):
                 len(request.answer or ""),
                 bool(transcript_text and transcript_text.strip()),
             )
-            evaluation = await agent.evaluate_answer(request.question, request.answer, transcript_text)
+            evaluation = await agent.evaluate_answer(
+                request.question,
+                request.answer,
+                transcript_text,
+                level=session.get("coach_level") or "level_2",
+            )
 
             if "answers" not in session:
                 session["answers"] = []
@@ -592,6 +605,7 @@ async def get_session_status(session_id: str):
         "voice_agent_text": session.get("voice_agent_text", {}),
         "voice_messages": session.get("voice_messages", []),
         "voice_settings": session.get("voice_settings", {}),
+        "coach_level": session.get("coach_level", "level_2"),
     }
 
 
@@ -764,7 +778,8 @@ def _build_voice_instructions(session_id: str, session: Dict[str, Any]) -> str:
     resume_excerpt = _truncate_text(session.get("resume_text", ""), 1500)
     job_desc_excerpt = _truncate_text(session.get("job_desc_text", ""), 1500)
 
-    base_prompt = get_base_coach_prompt()
+    level = session.get("coach_level") or "level_2"
+    base_prompt = build_dual_level_prompt(level)
 
     instructions = f"""
 {base_prompt}
@@ -787,6 +802,18 @@ Keep responses under 30 seconds and always send a short text summary alongside a
 Wrap up when the candidate indicates they are done or when the planned questions are covered.
 """
     return textwrap.dedent(instructions).strip()
+
+
+@app.patch("/session/{session_id}/coach-level")
+async def set_coach_level(session_id: str, payload: SetCoachLevelRequest):
+    """Update the coaching level used by prompts and realtime instructions."""
+    session = _get_session(session_id)
+    level = (payload.level or "").strip().lower()
+    if level not in {"level_1", "level_2"}:
+        raise HTTPException(status_code=400, detail="Invalid level; use level_1 or level_2")
+    session["coach_level"] = level
+    _persist_session_state(session_id, session)
+    return {"ok": True, "level": level}
 
 
 @app.post("/voice/session", response_model=VoiceSessionResponse)
