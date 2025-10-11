@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import List, Dict, Any, Optional
 from functools import lru_cache
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Depends, BackgroundTasks
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.responses import JSONResponse, HTMLResponse, StreamingResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -873,9 +873,14 @@ async def create_voice_session(request: VoiceSessionRequest):
     )
 
 
-@lru_cache(maxsize=1)
-def _load_voice_catalog() -> List[Dict[str, Any]]:
-    """Load static voice catalog from JSON file."""
+@lru_cache(maxsize=4)
+def _load_voice_catalog(_version: float) -> List[Dict[str, Any]]:
+    """Load static voice catalog from JSON file.
+
+    The `_version` parameter should pass the file's last-modified time so that
+    updates to `voice_catalog.json` are reflected without restarting the server
+    and without permanently disabling caching.
+    """
     path = os.path.join(os.path.dirname(__file__), "voice_catalog.json")
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -891,8 +896,16 @@ def _load_voice_catalog() -> List[Dict[str, Any]]:
 
 @app.get("/voices", response_model=List[VoiceDescriptor])
 async def list_voices():
-    """Return the available voice catalog for selection and preview."""
-    raw = _load_voice_catalog()
+    """Return the available voice catalog for selection and preview.
+
+    Includes a lightweight cache that invalidates when the JSON file changes.
+    """
+    path = os.path.join(os.path.dirname(__file__), "voice_catalog.json")
+    try:
+        version = os.path.getmtime(path)
+    except Exception:
+        version = 0.0
+    raw = _load_voice_catalog(version)
     return [VoiceDescriptor(**item) for item in raw if isinstance(item, dict)]
 
 
@@ -908,7 +921,13 @@ async def update_session_voice(session_id: str, request: SetVoiceRequest):
     if not voice_id:
         raise HTTPException(status_code=400, detail="voice_id is required")
 
-    catalog_ids = {item.get("id") for item in _load_voice_catalog() if isinstance(item, dict)}
+    # Validate against current catalog; invalidate cache on file changes
+    _catalog_path = os.path.join(os.path.dirname(__file__), "voice_catalog.json")
+    try:
+        _version = os.path.getmtime(_catalog_path)
+    except Exception:
+        _version = 0.0
+    catalog_ids = {item.get("id") for item in _load_voice_catalog(_version) if isinstance(item, dict)}
     if catalog_ids and voice_id not in catalog_ids:
         raise HTTPException(status_code=400, detail="Unknown voice_id")
 
@@ -918,6 +937,93 @@ async def update_session_voice(session_id: str, request: SetVoiceRequest):
     _persist_session_state(session_id, session)
 
     return {"ok": True, "voice_id": voice_id}
+
+
+def _catalog_lookup() -> List[Dict[str, Any]]:
+    """Helper to return the current voice catalog with cache invalidation."""
+    path = os.path.join(os.path.dirname(__file__), "voice_catalog.json")
+    try:
+        version = os.path.getmtime(path)
+    except Exception:
+        version = 0.0
+    return _load_voice_catalog(version)
+
+
+@app.get("/voices/preview/{voice_id}")
+async def voice_preview(voice_id: str):
+    """Return an MP3 preview for the given voice.
+
+    Strategy:
+    - If a pre-generated preview file exists under app/static/voices, serve it.
+    - Else, synthesize a short sample via OpenAI TTS and cache it to disk.
+    """
+    voice_id = (voice_id or "").strip().lower()
+    if not voice_id:
+        raise HTTPException(status_code=400, detail="voice_id is required")
+
+    # Validate voice against catalog ids if available
+    catalog = _catalog_lookup()
+    valid_ids = {v.get("id") for v in catalog if isinstance(v, dict)}
+    if valid_ids and voice_id not in valid_ids:
+        raise HTTPException(status_code=404, detail="Unknown voice")
+
+    # Serve cached/static file if present
+    static_dir = os.path.join("app", "static", "voices")
+    os.makedirs(static_dir, exist_ok=True)
+    filename = f"{voice_id}-preview.mp3"
+    file_path = os.path.join(static_dir, filename)
+    if os.path.exists(file_path):
+        return FileResponse(file_path, media_type="audio/mpeg")
+
+    # If no API key, we can't synthesize a preview
+    if not OPENAI_API_KEY:
+        raise HTTPException(status_code=503, detail="Preview unavailable")
+
+    # Build a short sample utterance
+    label = None
+    for item in catalog:
+        try:
+            if item.get("id") == voice_id:
+                label = item.get("label") or voice_id
+                break
+        except Exception:
+            continue
+    label = label or voice_id
+    sample_text = f"Hello! This is the {label} voice sample for your interview practice."
+
+    # Synthesize via OpenAI TTS HTTP API to avoid adding SDK complexity here
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            tts_resp = await client.post(
+                "https://api.openai.com/v1/audio/speech",
+                headers={
+                    "Authorization": f"Bearer {OPENAI_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "gpt-4o-mini-tts",
+                    "voice": voice_id,
+                    "input": sample_text,
+                    "format": "mp3",
+                },
+            )
+            tts_resp.raise_for_status()
+            audio_bytes = tts_resp.content
+    except httpx.HTTPStatusError as exc:
+        logger.exception("Voice preview synthesis failed: %s %s", exc.response.status_code, exc.response.text)
+        raise HTTPException(status_code=exc.response.status_code, detail="Unable to synthesize preview")
+    except Exception:
+        logger.exception("Error generating voice preview")
+        raise HTTPException(status_code=502, detail="Preview service error")
+
+    # Cache to disk for subsequent requests
+    try:
+        with open(file_path, "wb") as f:
+            f.write(audio_bytes)
+    except Exception:
+        logger.exception("Failed to cache synthesized preview for %s", voice_id)
+
+    return Response(content=audio_bytes, media_type="audio/mpeg")
 
 
 # Helper functions

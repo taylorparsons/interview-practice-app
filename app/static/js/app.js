@@ -1376,7 +1376,28 @@ async function initVoiceSelector() {
             });
         }
         if (voicePreviewBtn && voiceSelect && voicePreviewAudio) {
-            voicePreviewBtn.addEventListener('click', (e) => {
+            const setPreviewLoading = (loading) => {
+                const orig = voicePreviewBtn.dataset.origLabel || voicePreviewBtn.textContent;
+                if (!voicePreviewBtn.dataset.origLabel) {
+                    voicePreviewBtn.dataset.origLabel = orig;
+                }
+                voicePreviewBtn.disabled = !!loading;
+                voicePreviewBtn.classList.toggle('opacity-50', !!loading);
+                voiceSelect.disabled = !!loading;
+                if (startVoiceBtn) startVoiceBtn.disabled = !!loading;
+                voicePreviewBtn.textContent = loading ? 'Loading…' : voicePreviewBtn.dataset.origLabel;
+            };
+
+            // Ensure UI is restored when preview finishes or errors
+            const attachAutoRestore = () => {
+                const restore = () => setPreviewLoading(false);
+                voicePreviewAudio.addEventListener('playing', restore, { once: true });
+                voicePreviewAudio.addEventListener('canplay', restore, { once: true });
+                voicePreviewAudio.addEventListener('error', restore, { once: true });
+                voicePreviewAudio.addEventListener('ended', restore, { once: true });
+            };
+
+            voicePreviewBtn.addEventListener('click', async (e) => {
                 e.preventDefault();
                 const opt = voiceSelect.options[voiceSelect.selectedIndex];
                 const url = opt && opt.dataset.previewUrl;
@@ -1385,10 +1406,19 @@ async function initVoiceSelector() {
                     return;
                 }
                 try {
+                    // UI loading state
+                    setPreviewLoading(true);
+                    attachAutoRestore();
+                    // Stop any current preview
+                    try { voicePreviewAudio.pause(); } catch (_) {}
+                    voicePreviewAudio.currentTime = 0;
+                    // Start new preview
                     voicePreviewAudio.src = url;
                     voicePreviewAudio.classList.remove('hidden');
-                    voicePreviewAudio.play().catch(() => {});
-                } catch (_) {}
+                    await voicePreviewAudio.play().catch(() => {});
+                } catch (_) {
+                    setPreviewLoading(false);
+                }
             });
         }
         if (voiceSaveBtn && voiceSelect) {
