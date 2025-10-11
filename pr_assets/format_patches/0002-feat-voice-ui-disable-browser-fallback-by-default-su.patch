@@ -1,0 +1,678 @@
+From e5cb82670ec0ce9c0886eb74d29c6e2de65391dd Mon Sep 17 00:00:00 2001
+From: Taylor Parsons <taylor@veneo.ai>
+Date: Sat, 11 Oct 2025 12:14:15 -0700
+Subject: [PATCH 2/2] feat(voice/ui): disable browser fallback by default;
+ suppress echo during coach speech; deduplicate finalized user transcripts;
+ preview UX; tests
+
+- Default useBrowserAsr to false and remove pre-checked checkbox in template.
+- Gate auto-start of browser ASR behind explicit toggle; do not start on connect.
+- Suppress browser ASR while agent audio plays to prevent echo.
+- Deduplicate finalized "You" messages using normalization (case/punctuation) to avoid duplicates from multiple sources.
+- Voice preview: spinner/disabled state during generation/play.
+- Docs: update PRD TODO and PRD feature descriptions for preview caching and UI behavior.
+- Tests: add UI config/dedup tests, preview caching/404/503, catalog cache invalidation, voice settings in session; expand voice message tests for roles, aggregation, stream flag, and legacy backfill.
+---
+ app/static/js/app.js                |  61 +++++++-
+ app/templates/index.html            |   2 +-
+ app/voice_catalog.json              |  62 ++++++--
+ prd_new_feature_todo.md             |   3 +-
+ prd_new_features.md                 |  10 +-
+ tests/test_ui_fallback_and_dedup.py |  54 +++++++
+ tests/test_voice_messages.py        | 104 +++++++++++++
+ tests/test_voice_preview.py         | 224 ++++++++++++++++++++++++++++
+ 8 files changed, 499 insertions(+), 21 deletions(-)
+ create mode 100644 tests/test_ui_fallback_and_dedup.py
+ create mode 100644 tests/test_voice_preview.py
+
+diff --git a/app/static/js/app.js b/app/static/js/app.js
+index 68b8da4..29a967b 100644
+--- a/app/static/js/app.js
++++ b/app/static/js/app.js
+@@ -14,8 +14,15 @@ function createInitialVoiceState() {
+         userStream: null,
+         activityMonitor: null,
+         browserAsrActive: false,
++        // True while the agent is speaking; used to suppress browser ASR echo
++        agentSpeaking: false,
++        // When true, browser ASR results are ignored (set during agent audio)
++        suppressBrowserAsr: false,
++        // Normalized text of the most recent finalized user message to avoid dupes
++        lastUserFinalNormalized: '',
+         config: {
+-            useBrowserAsr: true,
++            // Default OFF: rely on server-side transcription unless explicitly enabled
++            useBrowserAsr: false,
+             showMetadata: false,
+         },
+     };
+@@ -424,6 +431,28 @@ function handleUserTranscriptChunk(transcript, options = {}) {
+             return;
+         }
+ 
++        // Deduplicate against the most recent finalized 'You' message (ignore case/punctuation)
++        const normalize = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
++        const currentNorm = normalize(finalText);
++        try {
++            for (let i = state.voice.messages.length - 1; i >= 0; i -= 1) {
++                const m = state.voice.messages[i];
++                if (m && m.role === 'user' && !m.stream && typeof m.text === 'string' && m.text.trim()) {
++                    const lastNorm = normalize(m.text);
++                    if (lastNorm === currentNorm) {
++                        // Update index snapshot but skip duplicate append/persist
++                        const qi = state.currentQuestionIndex;
++                        if (Number.isInteger(qi)) {
++                            state.voice.transcriptsByIndex[qi] = finalText;
++                        }
++                        state.voice.userStream = null;
++                        return;
++                    }
++                    break;
++                }
++            }
++        } catch (_) {}
++
+         if (active.element) {
+             active.element.textContent = finalText;
+         }
+@@ -451,6 +480,7 @@ function handleUserTranscriptChunk(transcript, options = {}) {
+         persistVoiceMessage('user', finalText, { questionIndex: persistIdx });
+ 
+         state.voice.userStream = null;
++        state.voice.lastUserFinalNormalized = currentNorm;
+     }
+ }
+ 
+@@ -692,17 +722,30 @@ function handleVoiceEvent(event) {
+             if (part.type === 'audio' && typeof part.transcript === 'string') {
+                 appendAgentDelta(part.transcript);
+                 finalizeAgentMessage();
++                // Agent finished a spoken segment; allow browser ASR again
++                if (state.voice) {
++                    state.voice.agentSpeaking = false;
++                    state.voice.suppressBrowserAsr = false;
++                }
+             }
+             break;
+         }
+         case 'output_audio_buffer.started': {
+             state.voice.transcriptBuffer = '';
+             state.voice.agentStream = null;
++            if (state.voice) {
++                state.voice.agentSpeaking = true;
++                state.voice.suppressBrowserAsr = true;
++            }
+             break;
+         }
+         case 'response.output_text.done':
+         case 'response.completed': {
+             finalizeAgentMessage();
++            if (state.voice) {
++                state.voice.agentSpeaking = false;
++                state.voice.suppressBrowserAsr = false;
++            }
+             break;
+         }
+         case 'response.created': {
+@@ -919,7 +962,15 @@ async function startVoiceInterview() {
+ 
+         dataChannel.onopen = () => {
+             updateVoiceStatus('Live', 'live');
+-            startBrowserAsrIfAvailable();
++            // Only start browser ASR if explicitly enabled and not suppressed
++            if (
++                state.voice &&
++                state.voice.config &&
++                state.voice.config.useBrowserAsr &&
++                !state.voice.suppressBrowserAsr
++            ) {
++                startBrowserAsrIfAvailable();
++            }
+             const openingQuestion =
+                 state.questions[state.currentQuestionIndex] ||
+                 state.questions[0] ||
+@@ -1083,11 +1134,11 @@ function setupSpeechRecognition() {
+         if (finalTranscript) {
+             // Append to textarea instead of replacing
+             answerInput.value += ' ' + finalTranscript;
+-            if (state.voice && state.voice.config && state.voice.config.useBrowserAsr) {
++            if (state.voice && state.voice.config && state.voice.config.useBrowserAsr && !state.voice.suppressBrowserAsr) {
+                 try { handleUserTranscriptChunk(finalTranscript, { finalize: true, source: 'browser_asr', confidence: finalConfidence }); } catch (_) {}
+             }
+         } else if (interimTranscript) {
+-            if (state.voice && state.voice.config && state.voice.config.useBrowserAsr) {
++            if (state.voice && state.voice.config && state.voice.config.useBrowserAsr && !state.voice.suppressBrowserAsr) {
+                 try { handleUserTranscriptChunk(interimTranscript, { finalize: false, source: 'browser_asr' }); } catch (_) {}
+             }
+         }
+@@ -1109,7 +1160,7 @@ function setupSpeechRecognition() {
+         state.isRecording = false;
+         state.voice.browserAsrActive = false;
+         // When voice session is live, attempt to restart for continuous capture
+-        if (state.voice && state.voice.peer && state.voice.dataChannel && state.voice.config && state.voice.config.useBrowserAsr) {
++        if (state.voice && state.voice.peer && state.voice.dataChannel && state.voice.config && state.voice.config.useBrowserAsr && !state.voice.suppressBrowserAsr) {
+             try { state.recognition.start(); state.isRecording = true; state.voice.browserAsrActive = true; } catch (_) {}
+         }
+     };
+diff --git a/app/templates/index.html b/app/templates/index.html
+index 0a2ad64..d11fbdc 100644
+--- a/app/templates/index.html
++++ b/app/templates/index.html
+@@ -134,7 +134,7 @@
+                         </div>
+                         <div class="mt-2 flex flex-wrap items-center gap-4 text-xs text-gray-600">
+                             <label class="inline-flex items-center gap-2">
+-                                <input id="toggle-browser-asr" type="checkbox" class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" checked>
++                                <input id="toggle-browser-asr" type="checkbox" class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
+                                 <span>Browser transcription fallback</span>
+                             </label>
+                             <label class="inline-flex items-center gap-2">
+diff --git a/app/voice_catalog.json b/app/voice_catalog.json
+index 92b966d..2458778 100644
+--- a/app/voice_catalog.json
++++ b/app/voice_catalog.json
+@@ -1,12 +1,52 @@
+ [
+-  { "id": "alloy",   "label": "Alloy",   "preview_url": "/voices/preview/alloy" },
+-  { "id": "ash",     "label": "Ash",     "preview_url": "/voices/preview/ash" },
+-  { "id": "ballad",  "label": "Ballad",  "preview_url": "/voices/preview/ballad" },
+-  { "id": "cedar",   "label": "Cedar",   "preview_url": "/voices/preview/cedar" },
+-  { "id": "coral",   "label": "Coral",   "preview_url": "/voices/preview/coral" },
+-  { "id": "echo",    "label": "Echo",    "preview_url": "/voices/preview/echo" },
+-  { "id": "marin",   "label": "Marin",   "preview_url": "/voices/preview/marin" },
+-  { "id": "sage",    "label": "Sage",    "preview_url": "/voices/preview/sage" },
+-  { "id": "shimmer", "label": "Shimmer", "preview_url": "/voices/preview/shimmer" },
+-  { "id": "verse",   "label": "Verse",   "preview_url": "/voices/preview/verse" }
+-]
++  {
++    "id": "alloy",
++    "label": "Alloy",
++    "preview_url": "/voices/preview/alloy"
++  },
++  {
++    "id": "ash",
++    "label": "Ash",
++    "preview_url": "/voices/preview/ash"
++  },
++  {
++    "id": "ballad",
++    "label": "Ballad",
++    "preview_url": "/voices/preview/ballad"
++  },
++  {
++    "id": "cedar",
++    "label": "Cedar",
++    "preview_url": "/voices/preview/cedar"
++  },
++  {
++    "id": "coral",
++    "label": "Coral",
++    "preview_url": "/voices/preview/coral"
++  },
++  {
++    "id": "echo",
++    "label": "Echo",
++    "preview_url": "/voices/preview/echo"
++  },
++  {
++    "id": "marin",
++    "label": "Marin",
++    "preview_url": "/voices/preview/marin"
++  },
++  {
++    "id": "sage",
++    "label": "Sage",
++    "preview_url": "/voices/preview/sage"
++  },
++  {
++    "id": "shimmer",
++    "label": "Shimmer",
++    "preview_url": "/voices/preview/shimmer"
++  },
++  {
++    "id": "verse",
++    "label": "Verse",
++    "preview_url": "/voices/preview/verse"
++  }
++]
+\ No newline at end of file
+diff --git a/prd_new_feature_todo.md b/prd_new_feature_todo.md
+index 7fdd5e1..ee76208 100644
+--- a/prd_new_feature_todo.md
++++ b/prd_new_feature_todo.md
+@@ -52,7 +52,8 @@ Checklist derived from the technical design in `prd_new_features.md`. Each secti
+ - [x] Backend: update session start/realtime handshake to send the selected `voice_id` from `voice_settings`.
+ - [x] Backend: add `PATCH /session/{id}/voice` to persist `voice_id` with catalog validation.
+ - [x] Frontend: add selector UI with preview playback (local audio element) and save flow tied to the new endpoint.
+-- [ ] Frontend: cache preview clips client-side and guard against starting a new prompt while previewing.
++- [x] Frontend: preview UX improvements — show loading spinner, disable Voice/Start buttons during preview to prevent mid-call changes, auto-restore state on play/end/error.
++- [x] Preview caching: implement server-side preview synthesis and caching via `GET /voices/preview/{id}`. First request synthesizes an MP3 and writes to `app/static/voices/{id}-preview.mp3`; subsequent requests serve the cached file (plus normal browser HTTP caching).
+ - [x] QA: add tests for catalog endpoint, voice persistence, and usage in realtime session payload; reject unknown voice IDs.
+ - [ ] Telemetry: log voice selection frequency for future catalog tuning.
+ 
+diff --git a/prd_new_features.md b/prd_new_features.md
+index 46556c4..ed146d9 100644
+--- a/prd_new_features.md
++++ b/prd_new_features.md
+@@ -185,9 +185,13 @@ Outcome: Structured artifact for deliberate practice.
+ 
+ ### MVP 5 — Voice Selection with Preview
+ - **Existing**: Voice ID is fixed in config and shared across users.
+-- **Additions**: Define a catalog (`voice_catalog.json`) storing voice IDs, labels, and preview URLs. Serve it via `GET /voices`. Session settings persist the chosen `voice_id`; the realtime agent includes it on stream creation. Frontend fetches the catalog, caches short preview clips locally, and plays them via the `<audio>` element before committing changes.
+-- **Rationale**: Centralizing voice metadata keeps configuration server-driven while limiting client logic to presentation. Short previews avoid hitting the realtime API during selection and create a more responsive UX.
+-- **Acceptance**: GIVEN the user opens the voice selector WHEN they preview a voice and confirm their choice THEN the preview plays locally without affecting the active session, and subsequent prompts use the newly selected `voice_id` stored in `voice_settings`.
++- **Additions**:
++  - Catalog: `voice_catalog.json` with `{ id, label, preview_url }`, served via `GET /voices`.
++  - Session setting: `voice_settings.voice_id`; included in realtime session creation so new prompts use the selected voice.
++  - Preview endpoint: `GET /voices/preview/{voice_id}`. If `app/static/voices/{id}-preview.mp3` exists, serve it directly. Otherwise synthesize a short sample via OpenAI TTS (`gpt-4o-mini-tts`), cache to disk, and return `audio/mpeg`.
++  - UI: dropdown fed by `/voices`, Preview button plays `preview_url` in an `<audio>` element, shows a loading spinner, disables Start/Voice controls during generation/play, restores on end/error, and does not affect the current live session.
++- **Rationale**: Server-side preview caching guarantees consistent previews and eliminates repeated TTS calls. The UI stays simple and responsive while avoiding mid-session voice changes.
++- **Acceptance**: GIVEN the user opens the voice selector WHEN they click Preview THEN audio plays and controls show a loading state without interrupting any active session; WHEN they click Save THEN `/session/{id}/voice` persists the `voice_id` and the next session start uses it.
+ 
+ ### MVP 6 — PDF Study Guide Export
+ - **Existing**: No export path; the server only serves HTML/timeline responses.
+diff --git a/tests/test_ui_fallback_and_dedup.py b/tests/test_ui_fallback_and_dedup.py
+new file mode 100644
+index 0000000..dd30746
+--- /dev/null
++++ b/tests/test_ui_fallback_and_dedup.py
+@@ -0,0 +1,54 @@
++from pathlib import Path
++
++
++ROOT = Path(__file__).resolve().parents[1]
++JS_PATH = ROOT / "app" / "static" / "js" / "app.js"
++HTML_PATH = ROOT / "app" / "templates" / "index.html"
++
++
++def _read_text(path: Path) -> str:
++    with open(path, "r", encoding="utf-8") as f:
++        return f.read()
++
++
++def test_fallback_default_off_in_js():
++    js = _read_text(JS_PATH)
++    # Ensure the initial voice state disables browser ASR by default
++    assert "useBrowserAsr: false" in js
++
++
++def test_browser_fallback_checkbox_not_prechecked():
++    html = _read_text(HTML_PATH)
++    # The toggle should not include the 'checked' attribute by default
++    line = next(
++        (l for l in html.splitlines() if 'id="toggle-browser-asr"' in l and '<input' in l),
++        "",
++    )
++    assert "checked" not in line
++
++
++def test_onopen_does_not_autostart_browser_asr():
++    js = _read_text(JS_PATH)
++    # Ensure startBrowserAsrIfAvailable is gated behind useBrowserAsr and suppression checks
++    assert "dataChannel.onopen" in js
++    assert "startBrowserAsrIfAvailable()" in js
++    # Verify gating condition exists alongside the call
++    assert "useBrowserAsr" in js and "suppressBrowserAsr" in js
++
++
++def test_speech_recognition_events_are_gated_by_suppression():
++    js = _read_text(JS_PATH)
++    # onresult interim/final paths should check both useBrowserAsr and !suppressBrowserAsr
++    assert "useBrowserAsr && !state.voice.suppressBrowserAsr" in js
++    # Restart-on-end should also be gated
++    assert "useBrowserAsr && !state.voice.suppressBrowserAsr" in js
++
++
++def test_deduplication_logic_present_for_user_final_messages():
++    js = _read_text(JS_PATH)
++    # Check the presence of normalization-based duplicate skip in handleUserTranscriptChunk
++    assert "handleUserTranscriptChunk" in js
++    assert "normalize(" in js
++    assert "replace(/[^a-z0-9]+/g, ' ')" in js
++    # Ensure we check against last finalized 'user' entry and skip duplicates
++    assert "m.role === 'user'" in js and "!m.stream" in js
+diff --git a/tests/test_voice_messages.py b/tests/test_voice_messages.py
+index 617ba62..242d3e3 100644
+--- a/tests/test_voice_messages.py
++++ b/tests/test_voice_messages.py
+@@ -183,3 +183,107 @@ def test_voice_messages_include_question_index_in_session_payload(session_factor
+     assert len(msgs) == 2
+     assert all("question_index" in m for m in msgs)
+     assert msgs[0]["question_index"] == qidx and msgs[1]["question_index"] == qidx
++
++
++def test_role_synonyms_are_normalized(session_factory, client):
++    """Posting assistant/agent should normalize to coach; candidate stays candidate."""
++    session_id = session_factory()
++
++    # Post as 'assistant' (should become coach)
++    r1 = client.post(
++        f"/session/{session_id}/voice-messages",
++        json={"role": "assistant", "text": "Coach guidance.", "question_index": 1},
++    )
++    assert r1.status_code == 200
++
++    # Post as 'candidate'
++    r2 = client.post(
++        f"/session/{session_id}/voice-messages",
++        json={"role": "candidate", "text": "My answer.", "question_index": 1},
++    )
++    assert r2.status_code == 200
++
++    data = client.get(f"/session/{session_id}").json()
++    roles = [m["role"] for m in data["voice_messages"] if m.get("question_index") == 1]
++    assert set(roles) == {"coach", "candidate"}
++    assert data["voice_agent_text"]["1"] == "Coach guidance."
++    assert data["voice_transcripts"]["1"] == "My answer."
++
++
++def test_transcript_and_coach_text_aggregate_across_messages(session_factory, client):
++    session_id = session_factory()
++
++    # Two user messages for same index
++    client.post(
++        f"/session/{session_id}/voice-messages",
++        json={"role": "user", "text": "Part A", "question_index": 0},
++    )
++    client.post(
++        f"/session/{session_id}/voice-messages",
++        json={"role": "user", "text": "Part B", "question_index": 0},
++    )
++
++    # Two coach messages for same index
++    client.post(
++        f"/session/{session_id}/voice-messages",
++        json={"role": "agent", "text": "Coach A", "question_index": 0},
++    )
++    client.post(
++        f"/session/{session_id}/voice-messages",
++        json={"role": "agent", "text": "Coach B", "question_index": 0},
++    )
++
++    data = client.get(f"/session/{session_id}").json()
++    assert data["voice_transcripts"]["0"] == "Part A\nPart B"
++    assert data["voice_agent_text"]["0"] == "Coach A\nCoach B"
++
++
++def test_stream_flag_persists_on_entries(session_factory, client):
++    session_id = session_factory()
++    client.post(
++        f"/session/{session_id}/voice-messages",
++        json={"role": "user", "text": "interim", "question_index": 2, "stream": True},
++    )
++    client.post(
++        f"/session/{session_id}/voice-messages",
++        json={"role": "user", "text": "final", "question_index": 2, "stream": False},
++    )
++    data = client.get(f"/session/{session_id}").json()
++    entries = [m for m in data["voice_messages"] if m.get("question_index") == 2]
++    assert entries[0]["text"] == "interim" and entries[0].get("stream") is True
++    assert entries[1]["text"] == "final" and entries[1].get("stream") is False
++
++
++def test_legacy_session_backfills_missing_voice_fields(client):
++    """Older sessions without voice keys are backfilled with defaults on read."""
++    import uuid
++    sid = str(uuid.uuid4())
++    now = "2024-01-01T00:00:00Z"
++    legacy_payload = {
++        "resume_path": "uploads/resume.txt",
++        "job_desc_path": "uploads/job.txt",
++        "resume_text": "Sample",
++        "job_desc_text": "Sample JD",
++        "name": "legacy",
++        "questions": ["Tell me about yourself."],
++        "answers": [],
++        "evaluations": [],
++        "agent": None,
++        "current_question_index": 0,
++        "created_at": now,
++        "updated_at": now,
++        # Missing or None voice fields
++        "voice_transcripts": None,
++        "voice_agent_text": None,
++        "voice_messages": None,
++    }
++    # Persist directly via internal helper
++    from app.main import _persist_session_state
++    _persist_session_state(sid, legacy_payload)
++
++    res = client.get(f"/session/{sid}")
++    assert res.status_code == 200
++    payload = res.json()
++    assert isinstance(payload.get("voice_transcripts"), dict)
++    assert isinstance(payload.get("voice_agent_text"), dict)
++    assert isinstance(payload.get("voice_messages"), list)
+diff --git a/tests/test_voice_preview.py b/tests/test_voice_preview.py
+new file mode 100644
+index 0000000..9728f41
+--- /dev/null
++++ b/tests/test_voice_preview.py
+@@ -0,0 +1,224 @@
++import json
++import os
++import sys
++from pathlib import Path
++
++import pytest
++from fastapi.testclient import TestClient
++
++
++ROOT_DIR = Path(__file__).resolve().parents[1]
++if str(ROOT_DIR) not in sys.path:
++    sys.path.insert(0, str(ROOT_DIR))
++
++import app.main as main  # noqa: E402
++
++
++CATALOG_PATH = Path(main.__file__).parent / "voice_catalog.json"
++VOICES_DIR = ROOT_DIR / "app" / "static" / "voices"
++
++
++def _read_catalog():
++    with open(CATALOG_PATH, "r", encoding="utf-8") as f:
++        return json.load(f)
++
++
++def _write_catalog(data):
++    with open(CATALOG_PATH, "w", encoding="utf-8") as f:
++        json.dump(data, f, indent=2)
++
++
++@pytest.fixture
++def client():
++    return TestClient(main.app)
++
++
++def test_preview_serves_cached_file(client, tmp_path):
++    voices = _read_catalog()
++    test_id = "testcached"
++    try:
++        # Ensure catalog entry exists and mtime changes
++        if not any(v.get("id") == test_id for v in voices):
++            voices.append({"id": test_id, "label": "Test Cached", "preview_url": f"/voices/preview/{test_id}"})
++            _write_catalog(voices)
++
++        # Create a dummy cached mp3
++        VOICES_DIR.mkdir(parents=True, exist_ok=True)
++        p = VOICES_DIR / f"{test_id}-preview.mp3"
++        payload = b"ID3FAKE-CACHED"
++        with open(p, "wb") as f:
++            f.write(payload)
++
++        r = client.get(f"/voices/preview/{test_id}")
++        assert r.status_code == 200
++        assert r.headers.get("content-type", "").startswith("audio/mpeg")
++        assert r.content == payload
++    finally:
++        # Cleanup
++        try:
++            (VOICES_DIR / f"{test_id}-preview.mp3").unlink()
++        except FileNotFoundError:
++            pass
++        # Restore catalog
++        base = [v for v in _read_catalog() if v.get("id") != test_id]
++        _write_catalog(base)
++
++
++def _fake_tts_client_factory(audio_bytes: bytes, record: dict):
++    class _FakeAsyncClient:
++        def __init__(self, *args, **kwargs):
++            pass
++
++        async def __aenter__(self):
++            return self
++
++        async def __aexit__(self, exc_type, exc, tb):
++            return False
++
++        async def post(self, url, headers=None, json=None):
++            record["url"] = url
++            record["headers"] = headers
++            record["json"] = json
++
++            class _Resp:
++                status_code = 200
++                content = audio_bytes
++
++                def raise_for_status(self):
++                    return None
++
++            return _Resp()
++
++    return _FakeAsyncClient
++
++
++def test_preview_synthesizes_and_caches_when_missing(client, monkeypatch):
++    voices = _read_catalog()
++    test_id = "newsynth"
++    mp3_path = VOICES_DIR / f"{test_id}-preview.mp3"
++    try:
++        if not any(v.get("id") == test_id for v in voices):
++            voices.append({"id": test_id, "label": "New Synth", "preview_url": f"/voices/preview/{test_id}"})
++            _write_catalog(voices)
++
++        # Ensure no cached file
++        if mp3_path.exists():
++            mp3_path.unlink()
++
++        # Mock API key and TTS HTTP client
++        monkeypatch.setattr(main, "OPENAI_API_KEY", "test_key")
++        fake_audio = b"ID3FAKE-SYNTH"
++        captured = {}
++        monkeypatch.setattr(main.httpx, "AsyncClient", _fake_tts_client_factory(fake_audio, captured))
++
++        r = client.get(f"/voices/preview/{test_id}")
++        assert r.status_code == 200
++        assert r.headers.get("content-type", "").startswith("audio/mpeg")
++        assert r.content == fake_audio
++        # Cached file written
++        assert mp3_path.exists() and mp3_path.stat().st_size == len(fake_audio)
++
++        # On second call, ensure it serves cached file (no TTS). Replace client to raise if called.
++        class _FailClient:
++            async def __aenter__(self):
++                raise AssertionError("TTS should not be called when cache exists")
++            async def __aexit__(self, *args, **kwargs):
++                return False
++
++        monkeypatch.setattr(main.httpx, "AsyncClient", _FailClient)
++        r2 = client.get(f"/voices/preview/{test_id}")
++        assert r2.status_code == 200
++        assert r2.content == fake_audio
++    finally:
++        try:
++            mp3_path.unlink()
++        except FileNotFoundError:
++            pass
++        base = [v for v in _read_catalog() if v.get("id") != test_id]
++        _write_catalog(base)
++
++
++def test_preview_unknown_voice_returns_404(client):
++    # Use an id unlikely to exist in catalog
++    r = client.get("/voices/preview/does-not-exist--12345")
++    assert r.status_code == 404
++
++
++def test_preview_returns_503_without_key_and_no_cache(client):
++    voices = _read_catalog()
++    test_id = "nokey"
++    try:
++        if not any(v.get("id") == test_id for v in voices):
++            voices.append({"id": test_id, "label": "No Key", "preview_url": f"/voices/preview/{test_id}"})
++            _write_catalog(voices)
++        mp3 = VOICES_DIR / f"{test_id}-preview.mp3"
++        if mp3.exists():
++            mp3.unlink()
++        # Ensure API key is blank
++        main.OPENAI_API_KEY = ""
++        r = client.get(f"/voices/preview/{test_id}")
++        assert r.status_code == 503
++    finally:
++        try:
++            (VOICES_DIR / f"{test_id}-preview.mp3").unlink()
++        except FileNotFoundError:
++            pass
++        base = [v for v in _read_catalog() if v.get("id") != test_id]
++        _write_catalog(base)
++
++
++def test_catalog_cache_invalidation(client):
++    original = _read_catalog()
++    new_id = "tmpinvalidate"
++    try:
++        if not any(v.get("id") == new_id for v in original):
++            updated = list(original) + [{"id": new_id, "label": "Tmp", "preview_url": f"/voices/preview/{new_id}"}]
++            _write_catalog(updated)
++        res = client.get("/voices")
++        assert res.status_code == 200
++        ids = {v.get("id") for v in res.json()}
++        assert new_id in ids
++    finally:
++        _write_catalog(original)
++
++
++def test_session_payload_includes_voice_settings(client):
++    # Create a minimal session
++    sid = "session_voice_settings"
++    now = "2024-01-01T00:00:00Z"
++    payload = {
++        "resume_path": "uploads/resume.txt",
++        "job_desc_path": "uploads/job.txt",
++        "resume_text": "Sample",
++        "job_desc_text": "Sample JD",
++        "name": "voice_test",
++        "questions": ["Tell me about yourself."],
++        "answers": [],
++        "evaluations": [],
++        "agent": None,
++        "current_question_index": 0,
++        "created_at": now,
++        "updated_at": now,
++        "voice_transcripts": {},
++        "voice_agent_text": {},
++        "voice_messages": [],
++    }
++    main._persist_session_state(sid, payload)
++    r = client.patch(f"/session/{sid}/voice", json={"voice_id": "verse"})
++    assert r.status_code == 200
++    res = client.get(f"/session/{sid}")
++    assert res.status_code == 200
++    data = res.json()
++    assert data.get("voice_settings", {}).get("voice_id") == "verse"
++
++
++def test_voices_list_includes_all_expected_ids(client):
++    res = client.get("/voices")
++    assert res.status_code == 200
++    ids = {v.get("id") for v in res.json()}
++    expected = {
++        "alloy", "ash", "ballad", "cedar", "coral",
++        "echo", "marin", "sage", "shimmer", "verse",
++    }
++    assert expected.issubset(ids)
++
+-- 
+2.50.1 (Apple Git-155)
+
