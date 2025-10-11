@@ -417,7 +417,10 @@ function handleUserTranscriptChunk(transcript, options = {}) {
         // If the previous finalized speaker was the user, continue appending to the
         // last 'You' bubble even for interim chunks to avoid creating a new bubble.
         const lastEntry = state.voice.messages && state.voice.messages[state.voice.messages.length - 1];
-        const mayContinueUserBubble = state.voice.lastFinalSpeaker === 'user' && lastEntry && lastEntry.role === 'user' && !lastEntry.stream && voiceTranscript && voiceTranscript.lastElementChild;
+        // Prefer a purely structural check: if the last rendered entry is an existing
+        // finalized 'You' bubble, continue appending text into it. This is resilient
+        // to event ordering differences across browsers and realtime transports.
+        const mayContinueUserBubble = !!(lastEntry && lastEntry.role === 'user' && !lastEntry.stream && voiceTranscript && voiceTranscript.lastElementChild);
         if (mayContinueUserBubble) {
             const p = voiceTranscript.lastElementChild.querySelector('p');
             if (p) {
