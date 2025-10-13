@@ -1016,6 +1016,16 @@ function hydrateVoiceMessagesFromSession(sessionData) {
             if (typeof msg.question_index === 'number') {
                 state.voice.messages[result.entryIndex].question_index = msg.question_index;
             }
+            // Apply STAR+I formatting to hydrated Coach bubbles for consistency
+            try {
+                if (role === 'coach' || role === 'agent') {
+                    const p = result.wrapper && result.wrapper.querySelector('p');
+                    if (p) {
+                        const html = renderCoachTranscriptHtml(msg.text);
+                        if (html) p.innerHTML = html;
+                    }
+                }
+            } catch (_) { /* formatting is best-effort */ }
         }
     });
 }
@@ -1691,12 +1701,60 @@ function exportFullTranscript() {
                 });
             } catch (_) { /* ignore fallback wiring issues */ }
 
+            // Sort messages: by timestamp when both present; otherwise by
+            // question_index and role order (You -> Coach -> System), stable by original order.
+            const roleRank = (m) => {
+                const r = (m.role || '').toLowerCase();
+                if (r === 'candidate' || r === 'user') return 0; // You
+                if (r === 'coach' || r === 'agent' || r === 'assistant') return 1; // Coach
+                if (r === 'system') return 2;
+                return 3;
+            };
+            const withIndex = msgs.map((m, i) => ({ ...m, _i: i }));
+            const hasTs = (m) => {
+                if (!m || !m.timestamp) return false;
+                const t = Date.parse(m.timestamp);
+                return !Number.isNaN(t);
+            };
+            withIndex.sort((a, b) => {
+                const aHas = hasTs(a);
+                const bHas = hasTs(b);
+                if (aHas && bHas) {
+                    return Date.parse(a.timestamp) - Date.parse(b.timestamp);
+                }
+                const qa = Number.isInteger(a.question_index) ? a.question_index : Number.POSITIVE_INFINITY;
+                const qb = Number.isInteger(b.question_index) ? b.question_index : Number.POSITIVE_INFINITY;
+                if (qa !== qb) return qa - qb;
+                const ra = roleRank(a);
+                const rb = roleRank(b);
+                if (ra !== rb) return ra - rb;
+                return a._i - b._i;
+            });
+
+            // Coalesce consecutive 'You' lines to mirror UI behavior
+            const coalesced = [];
+            for (const m of withIndex) {
+                const role = (m.role === 'coach' || m.role === 'agent') ? 'Coach' : (m.role === 'candidate' || m.role === 'user') ? 'You' : 'System';
+                if (coalesced.length > 0 && role === 'You' && coalesced[coalesced.length - 1].role === 'You') {
+                    // Merge text, preserve earliest timestamp
+                    const prev = coalesced[coalesced.length - 1];
+                    const joined = [prev.text, m.text].filter(Boolean).join(' ').trim();
+                    prev.text = joined;
+                    // Keep prev.timestamp as-is (earliest)
+                    continue;
+                }
+                coalesced.push({
+                    role,
+                    text: m.text || '',
+                    timestamp: m.timestamp || '',
+                });
+            }
+
             // Format a simple, readable text export
             const lines = [];
-            msgs.forEach(m => {
-                const role = (m.role === 'coach' || m.role === 'agent') ? 'Coach' : (m.role === 'candidate' || m.role === 'user') ? 'You' : 'System';
+            coalesced.forEach(m => {
                 const ts = m.timestamp ? new Date(m.timestamp).toISOString() : '';
-                const line = [ts, role + ':', m.text || ''].filter(Boolean).join(' ');
+                const line = [ts, m.role + ':', m.text || ''].filter(Boolean).join(' ');
                 lines.push(line);
             });
             const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
