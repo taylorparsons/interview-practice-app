@@ -1,0 +1,23 @@
+@startsalt
+{
+  {T} Voice Coach — Live
+  "Controls" {
+    [ Stop Voice Session ] | [ Mute ] | {T} Live | [ Export Transcript ] | [ ⚙ Settings ]
+  }
+  --
+  "Transcript" {
+    {T} COACH  — Hello and welcome …
+    {T} YOU    — My experience …
+    {T} COACH  — Thanks. Try structuring with STAR …
+  }
+  --
+  "Settings Drawer (on ⚙)" {
+    () Browser transcription fallback  [ ]
+    () Show transcript metadata        [ ]
+    "Coaching Level" [ Help ▼ ] [ Save ]
+    "Voice" [ Alloy ▼ ] [ Preview ] [ Save ]
+    [ Close ]
+  }
+}
+@endsalt
+

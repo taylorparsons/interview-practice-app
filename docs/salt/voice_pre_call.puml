@@ -1,0 +1,19 @@
+@startsalt
+{
+  {T} Voice Coach — Pre‑Call
+  "Mic & Transport" {
+    "Status:"  {T} Mic idle
+    [ Start Voice Session ]
+  }
+  --
+  "Session Settings" {
+    () Browser transcription fallback  [ ]
+    () Show transcript metadata        [ ]
+    "Coaching Level" [ Help ▼ ] [ Save ]
+    "Voice" [ Verse ▼ ] [ Preview ] [ Save ]
+  }
+  --
+  [ Transcript will appear here once the session begins ]
+}
+@endsalt
+

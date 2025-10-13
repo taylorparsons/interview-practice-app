@@ -1,0 +1,42 @@
+@startsalt
+{
+  "Top Bar" {
+    [ New Interview ] | [ Sessions ▼ ] | [ Settings ⚙ ] | "Session: ai_product_manager_submitted_resume" | "Question 1 of 5" | [ View Docs ]
+  }
+
+  --
+
+  "Workspace" {
+    "Question Map (left rail)" {
+      * 1  • Not started
+      * 2  • In progress
+      * 3  ✓ Answered
+      * 4  ○ Review
+      * 5  • Not started
+      [ Filter: (All ▼) ]
+    } |
+    "Main Panel" {
+      {T} Question
+      [Can you describe a specific situation … ?]
+      --
+      {T} Your Answer
+      [........................................................................]
+      [........................................................................]
+      [ Submit Answer ] [ See Example Answer ]
+      --
+      {T} Voice Interview Coach (collapsible)
+      [ Start Voice Session ] [ Export Transcript ]  "Mic idle"
+      () Browser transcription fallback  [ ]  | "Coaching Level" [ Help ▼ ] [ Save ]
+      "Voice" [ Verse ▼ ] [ Preview ] [ Save ]
+      [--- Transcript will appear here once the session starts ---]
+    }
+  }
+
+  --
+
+  "Footer (sticky)" {
+    [ ◀ Prev ] | [ Next ▶ ] | [ Mark for review ] | [ Export Transcript ]
+  }
+}
+@endsalt
+
