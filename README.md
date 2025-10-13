@@ -120,6 +120,21 @@ Notes
 - Conversation summaries stream into the transcript panel while audio plays through the embedded `<audio>` element.
 - Use **Stop Voice Session** to release the connection, or restart the interview to reset the voice UI.
 
+### Voice Selection & Preview
+- Use the **Voice** dropdown to choose a coach voice and click **Save** to persist it for the session.
+- Click **Preview** to play an MP3 sample of the selected voice. The first request synthesizes the sample with OpenAI TTS and caches it under `app/static/voices/<id>-preview.mp3`; subsequent previews stream from cache.
+- Endpoints involved:
+  - `GET /voices` — returns the catalog of voices
+  - `PATCH /session/{session_id}/voice` — sets the session’s selected voice
+  - `GET /voices/preview/{voice_id}` — returns a cached/synthesized MP3 sample
+- Tip: Pre‑generate all previews for faster UX during development:
+  - `scripts/codex_up.sh --preseed-previews`
+
+### Browser Transcription Fallback
+- The UI exposes a “Browser transcription fallback” toggle (off by default). When server‑side transcription is disabled, you can enable this for local testing.
+- The browser ASR is automatically suppressed while the coach is speaking to prevent echo or misattribution.
+- Finalized duplicate “You” lines are de‑duplicated using simple normalization when both server and browser transcripts are active.
+
 ### Input Transcription (speech-to-text)
 Server-side input transcription can be enabled so the candidate’s speech is transcribed within the realtime session and streamed to the UI as text events.
 
@@ -141,6 +156,19 @@ You can control server-side turn detection behavior via environment variables in
 - `OPENAI_TURN_SILENCE_MS` = `500` (milliseconds)
 
 These map to the Realtime session `turn_detection` payload. Set values, restart the server, and start a new voice session to apply.
+
+### Coaching Level
+- The **Coaching Level** control lets you switch between:
+  - `level_1` (Help) — more supportive coaching
+  - `level_2` (Strict) — tougher guidance
+- The selected level is persisted per session and influences both the text agent and realtime voice instructions. Changes emit a telemetry line: `coach.level.change: session=<id> from=<old> to=<new>`.
+
+### Export Transcript
+- Click **Export Transcript** to download a readable text file of the session timeline.
+- Behavior mirrors the UI:
+  - Backfills missing “You” lines using per‑question `voice_transcripts`.
+  - Orders entries by timestamp when available; otherwise by question index and role (You → Coach → System), stable by original order.
+  - Coalesces consecutive “You” lines and preserves the earliest timestamp.
 
 ## Technologies Used
 - FastAPI
