@@ -126,6 +126,8 @@ const voicePreviewAudio = document.getElementById('voice-preview-audio');
 // Coaching level controls
 const coachLevelSelect = document.getElementById('coach-level-select');
 const coachLevelSaveBtn = document.getElementById('coach-level-save');
+// Voice submission button (parity with typed Submit)
+const submitVoiceBtn = document.getElementById('submit-voice-answer');
 
 const voiceStatusClasses = {
     idle: 'text-gray-500',
@@ -170,6 +172,8 @@ function setVoiceLayout(isLive) {
         voiceTranscript.classList.toggle('max-h-64', !isLive);
         voiceTranscript.classList.toggle('max-h-96', isLive);
     }
+    // Re-evaluate whether the voice transcript is ready to submit
+    try { updateVoiceSubmitAvailability(); } catch (_) {}
 }
 
 function setVoiceEnabled(enabled) {
@@ -204,6 +208,7 @@ function clearVoiceTranscript() {
     voiceTranscript.dataset.empty = 'true';
     voiceTranscript.innerHTML = '<p class="text-xs text-gray-500">Voice transcripts will appear here once the realtime session begins.</p>';
     setVoiceActivityIndicator('idle');
+    try { updateVoiceSubmitAvailability(); } catch (_) {}
 }
 
 const voiceRoleToBackend = {
@@ -484,6 +489,7 @@ function handleUserTranscriptChunk(transcript, options = {}) {
         if (Number.isInteger(questionIndex)) {
             state.voice.transcriptsByIndex[questionIndex] = active.text;
         }
+        try { updateVoiceSubmitAvailability(); } catch (_) {}
         return;
     }
 
@@ -545,6 +551,7 @@ function handleUserTranscriptChunk(transcript, options = {}) {
         state.voice.userStream = null;
         state.voice.lastUserFinalNormalized = currentNorm;
         state.voice.lastFinalSpeaker = 'user';
+        try { updateVoiceSubmitAvailability(); } catch (_) {}
     }
 }
 
@@ -745,6 +752,7 @@ function finalizeAgentMessage() {
     state.voice.agentStream = null;
     state.voice.transcriptBuffer = '';
     if (state.voice) { state.voice.lastFinalSpeaker = 'agent'; }
+    try { updateVoiceSubmitAvailability(); } catch (_) {}
 }
 
 function handleVoiceEvent(event) {
@@ -1221,6 +1229,71 @@ function stopVoiceInterview(options = {}) {
 
     setVoiceControls(false);
     setVoiceLayout(false);
+    try { updateVoiceSubmitAvailability(); } catch (_) {}
+}
+
+function updateVoiceSubmitAvailability() {
+    if (!submitVoiceBtn || !state || !state.voice) return;
+    const idx = state.currentQuestionIndex;
+    const t = Number.isInteger(idx) && state.voice.transcriptsByIndex
+        ? (state.voice.transcriptsByIndex[idx] || '')
+        : '';
+    const ready = typeof t === 'string' && t.trim().length >= 10; // minimal threshold
+    submitVoiceBtn.disabled = !ready;
+    submitVoiceBtn.classList.toggle('opacity-50', !ready);
+    submitVoiceBtn.classList.toggle('cursor-not-allowed', !ready);
+}
+
+async function handleVoiceAnswerSubmission() {
+    if (!state || !state.sessionId) {
+        alert('Start or resume a session first.');
+        return;
+    }
+    const idx = state.currentQuestionIndex;
+    const question = state.questions[idx];
+    const transcript = (state.voice && state.voice.transcriptsByIndex && Number.isInteger(idx))
+        ? (state.voice.transcriptsByIndex[idx] || '').trim()
+        : '';
+    if (!transcript) {
+        alert('No voice transcript available yet. Speak your answer, then submit.');
+        return;
+    }
+    if (state.isRecording) {
+        try { stopRecording(); } catch (_) {}
+    }
+    const orig = submitVoiceBtn ? submitVoiceBtn.textContent : '';
+    if (submitVoiceBtn) { submitVoiceBtn.disabled = true; submitVoiceBtn.textContent = 'Submitting…'; }
+    try {
+        const res = await fetch('/evaluate-answer', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                session_id: state.sessionId,
+                question,
+                answer: transcript,
+                voice_transcript: transcript,
+            })
+        });
+        if (!res.ok) {
+            const errText = await res.text();
+            throw new Error(errText || 'Failed to submit voice answer');
+        }
+        const data = await res.json();
+        const evaluation = data && data.evaluation ? data.evaluation : null;
+        if (evaluation) {
+            state.answers.push({ question, answer: transcript });
+            state.evaluations.push(evaluation);
+            displayFeedback(evaluation);
+        } else {
+            alert('No evaluation returned.');
+        }
+    } catch (err) {
+        console.error('Voice submit error:', err);
+        alert('Unable to submit voice answer.');
+    } finally {
+        if (submitVoiceBtn) { submitVoiceBtn.textContent = orig; }
+        updateVoiceSubmitAvailability();
+    }
 }
 
 // Speech Recognition Setup
@@ -1449,6 +1522,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (exportTranscriptBtn) {
         exportTranscriptBtn.addEventListener('click', exportFullTranscript);
+    }
+    if (submitVoiceBtn) {
+        submitVoiceBtn.addEventListener('click', handleVoiceAnswerSubmission);
+        try { updateVoiceSubmitAvailability(); } catch (_) {}
     }
 });
 
