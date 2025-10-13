@@ -241,7 +241,47 @@ Render tips
 
 ---
 
-## I. Keyboard Shortcuts (Legend)
+## I. Voice — Submit Voice Answer (CTA)
+
+```
+@startsalt
+{
+  {T} Voice Coach — Answer Ready
+  "Controls" {
+    [ Start Voice Session ] | {T} Ready • 132 words | [ Submit Voice Answer ] | [ Export Transcript ]
+  }
+  --
+  "Transcript (candidate)" {
+    {T} YOU — … auto‑assembled transcript for current question …
+  }
+  --
+  "Notes" {
+    {T} Hint: You can review or edit before submitting.
+  }
+}
+@endsalt
+```
+
+---
+
+## J. Voice — Review & Confirm Modal
+
+```
+@startsalt
+{
+  {T} Review Voice Answer
+  [........................................................................]
+  [........................................................................]
+  [........................................................................]
+  --
+  [ Cancel ]  [ Edit Text ]  [ Submit for Evaluation ]
+}
+@endsalt
+```
+
+---
+
+## K. Keyboard Shortcuts (Legend)
 
 ```
 @startsalt
