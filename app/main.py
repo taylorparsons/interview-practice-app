@@ -817,8 +817,14 @@ async def set_coach_level(session_id: str, payload: SetCoachLevelRequest):
     level = (payload.level or "").strip().lower()
     if level not in {"level_1", "level_2"}:
         raise HTTPException(status_code=400, detail="Invalid level; use level_1 or level_2")
+    old = session.get("coach_level") or "level_1"
     session["coach_level"] = level
     _persist_session_state(session_id, session)
+    # Emit structured info for telemetry and auditing of coach-level changes
+    try:
+        logger.info("coach.level.change: session=%s from=%s to=%s", session_id, old, level)
+    except Exception:
+        pass
     return {"ok": True, "level": level}
 
 
