@@ -107,6 +107,10 @@ Options and env vars
 Notes
 - Voice features (realtime + previews) require `OPENAI_API_KEY` in `.env`. If missing, the server still starts but voice endpoints will return 5xx when invoked.
 - Use `scripts/codex_up.sh` in constrained environments or CI. Use `run_voice.sh` for a stricter voice-first workflow that enforces the API key.
+- Voice transcription defaults (browser fallback + metadata display) are now controlled via `.env` instead of runtime toggles:
+  - `VOICE_BROWSER_FALLBACK_DEFAULT` (bool, default `false`) – when `true`, the browser speech-recognition fallback auto-starts during voice sessions.
+  - `VOICE_SHOW_METADATA_DEFAULT` (bool, default `false`) – when `true`, transcript bubbles show timestamp/confidence/source metadata.
+  - These values are injected into `window.APP_CONFIG.voice` so the client respects the server configuration without extra UI toggles.
 
 ## Helper Scripts
 - `./run_voice.sh`: Boots the FastAPI server with realtime voice defaults. Add `--no-reload` to disable auto-reload or `--python 3.11` to prefer a specific Python version.
