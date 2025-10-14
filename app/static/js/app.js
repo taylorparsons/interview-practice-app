@@ -1581,6 +1581,9 @@ document.addEventListener('DOMContentLoaded', () => {
             sessionsModal.classList.remove('hidden');
         });
     }
+    if (openSettingsBtn && voiceSettingsDrawer) {
+        openSettingsBtn.addEventListener('click', () => { syncVoiceSettingsDrawer(); voiceSettingsDrawer.classList.remove('hidden'); });
+    }
     if (sessionsCloseBtn && sessionsModal) {
         sessionsCloseBtn.addEventListener('click', () => sessionsModal.classList.add('hidden'));
     }
@@ -1642,6 +1645,34 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (closeVoiceSettingsBtn && voiceSettingsDrawer) {
         closeVoiceSettingsBtn.addEventListener('click', () => voiceSettingsDrawer.classList.add('hidden'));
+    }
+    // Drawer: preview and save
+    if (voicePreviewBtn2 && voiceSelect2 && voicePreviewAudio2) {
+        voicePreviewBtn2.addEventListener('click', async () => {
+            syncVoiceSettingsDrawer();
+            const opt = voiceSelect2.options[voiceSelect2.selectedIndex];
+            const url = opt && opt.dataset.previewUrl;
+            if (!url) return alert('No preview available for this voice.');
+            try {
+                voicePreviewAudio2.src = url;
+                voicePreviewAudio2.classList.remove('hidden');
+                await voicePreviewAudio2.play().catch(() => {});
+            } catch (_) {}
+        });
+    }
+    if (voiceSaveBtn2 && voiceSelect2) {
+        voiceSaveBtn2.addEventListener('click', async () => {
+            if (!state.sessionId) return alert('Start or resume a session first.');
+            const voiceId = voiceSelect2.value;
+            try {
+                const r = await fetch(`/session/${state.sessionId}/voice`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ voice_id: voiceId }) });
+                if (!r.ok) throw new Error(await r.text());
+                if (voiceSelect) voiceSelect.value = voiceId;
+                alert('Voice saved. New prompts will use this voice.');
+            } catch (err) {
+                alert(err.message || 'Unable to save voice');
+            }
+        });
     }
 });
 
@@ -1793,31 +1824,35 @@ async function initVoiceSelector() {
                 }
             });
         }
-        if (voiceSaveBtn && voiceSelect) {
-            voiceSaveBtn.addEventListener('click', async (e) => {
-                e.preventDefault();
-                if (!state.sessionId) {
-                    alert('Start or resume a session first.');
-                    return;
+    if (voiceSaveBtn && voiceSelect) {
+        voiceSaveBtn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            if (!state.sessionId) {
+                alert('Start or resume a session first.');
+                return;
+            }
+            const voiceId = voiceSelect.value;
+            if (!voiceId) return;
+            try {
+                const r = await fetch(`/session/${state.sessionId}/voice`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ voice_id: voiceId })
+                });
+                if (!r.ok) {
+                    const detail = await r.text();
+                    throw new Error(detail || 'Failed to save voice');
                 }
-                const voiceId = voiceSelect.value;
-                if (!voiceId) return;
-                try {
-                    const r = await fetch(`/session/${state.sessionId}/voice`, {
-                        method: 'PATCH',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ voice_id: voiceId })
-                    });
-                    if (!r.ok) {
-                        const detail = await r.text();
-                        throw new Error(detail || 'Failed to save voice');
-                    }
-                    alert('Voice saved. New prompts will use this voice.');
-                } catch (err) {
-                    alert(err.message || 'Unable to save voice');
+                // Mirror selection into the drawer select if present
+                if (typeof voiceSelect2 !== 'undefined' && voiceSelect2) {
+                    voiceSelect2.value = voiceId;
                 }
-            });
-        }
+                alert('Voice saved. New prompts will use this voice.');
+            } catch (err) {
+                alert(err.message || 'Unable to save voice');
+            }
+        });
+    }
     } catch (err) {
         console.warn('Voice catalog unavailable:', err);
     }
