@@ -40,7 +40,7 @@ function createInitialState() {
         answers: [],
         evaluations: [],
         reviewFlags: {},
-        coachLevel: appVoiceConfig.defaultCoachLevel || 'level_1',
+        coachLevel: 'level_1',
         resumeText: '',
         jobDescText: '',
         room: null,
