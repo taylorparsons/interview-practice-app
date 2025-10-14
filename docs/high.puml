@@ -1,0 +1,19 @@
+@startsalt
+{
+  {T} Interview Practice App — Home
+
+  "Resume Session" {
+    [Saved sessions ▼] | [ Load ] [ Delete ]
+    [Rename selected session ____________________________] | [ Rename ]
+  }
+
+  --
+
+  "Start New Interview" {
+    [Resume (PDF/DOCX/TXT)] | [ Choose File ]
+    [Job Description (PDF/DOCX/TXT)] | [ Choose File ]
+    [Or paste job description text here …........................................]
+    [ Start Interview Practice ]
+  }
+}
+@endsalt
