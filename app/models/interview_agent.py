@@ -199,54 +199,67 @@ class InterviewPracticeAgent:
         )
         
         # Extract and parse the evaluation
-        content = response.choices[0].message.content
+        content = response.choices[0].message.content or ""
         logger.debug("Raw evaluation response: %s", content)
-        
-        try:
-            # Try to directly parse the JSON
-            evaluation = json.loads(content)
-            logger.debug("Successfully parsed evaluation JSON: %s", evaluation)
-            
-            # Ensure all required fields are present
-            required_fields = ["score", "strengths", "weaknesses", "feedback", "example_improvement", "why_asked"]
-            missing_fields = [field for field in required_fields if field not in evaluation]
-            
-            if missing_fields:
-                logger.warning("Missing fields in evaluation response: %s", missing_fields)
-                # Add default values for missing fields
-                for field in missing_fields:
-                    if field == "score":
-                        evaluation[field] = 5
-                    elif field in ["strengths", "weaknesses"]:
-                        evaluation[field] = [f"No {field} provided"]
-                    else:
-                        evaluation[field] = f"No {field.replace('_', ' ')} provided"
-                
-        except json.JSONDecodeError as e:
-            logger.exception("Error parsing evaluation JSON")
-            
-            # Try to extract JSON from the text
+
+        # Guard: empty or non-JSON content should not raise noisy exceptions
+        text = content.strip()
+        if not text:
+            logger.warning("Empty evaluation response from model; using fallback")
+            evaluation = {
+                "score": 5,
+                "strengths": ["No structured feedback provided"],
+                "weaknesses": ["No structured feedback provided"],
+                "feedback": "",
+                "example_improvement": "N/A",
+                "why_asked": ""
+            }
+        else:
             try:
-                # Look for JSON-like structure in the response
-                match = re.search(r'\{.*\}', content, re.DOTALL)
-                if match:
-                    json_str = match.group(0)
-                    logger.debug("Extracted JSON string: %s", json_str)
-                    evaluation = json.loads(json_str)
-                    logger.debug("Successfully parsed extracted JSON: %s", evaluation)
+                # Fast path: only try direct JSON when it looks like JSON
+                if text.startswith("{") or text.startswith("["):
+                    evaluation = json.loads(text)
                 else:
-                    raise ValueError("No JSON structure found in response")
-            except Exception as e2:
-                logger.exception("Error extracting JSON when parsing evaluation response")
-                # Fallback to text response
-                evaluation = {
-                    "score": 5,
-                    "strengths": ["Unable to parse structured feedback"],
-                    "weaknesses": ["Unable to parse structured feedback"],
-                    "feedback": content,
-                    "example_improvement": "N/A"
-                }
-                logger.info("Using fallback evaluation: %s", evaluation)
+                    raise json.JSONDecodeError("Not JSON start", text, 0)
+
+                logger.debug("Successfully parsed evaluation JSON: %s", evaluation)
+
+                # Ensure all required fields are present
+                required_fields = ["score", "strengths", "weaknesses", "feedback", "example_improvement", "why_asked"]
+                missing_fields = [field for field in required_fields if field not in evaluation]
+
+                if missing_fields:
+                    logger.warning("Missing fields in evaluation response: %s", missing_fields)
+                    for field in missing_fields:
+                        if field == "score":
+                            evaluation[field] = 5
+                        elif field in ["strengths", "weaknesses"]:
+                            evaluation[field] = [f"No {field} provided"]
+                        else:
+                            evaluation[field] = f"No {field.replace('_', ' ')} provided"
+
+            except json.JSONDecodeError:
+                # Try to extract JSON from the text (best‑effort) without noisy stack traces
+                logger.warning("Evaluation response not valid JSON; attempting extraction")
+                try:
+                    match = re.search(r"\{.*\}", text, re.DOTALL)
+                    if match:
+                        json_str = match.group(0)
+                        evaluation = json.loads(json_str)
+                        logger.debug("Parsed JSON after extraction: %s", evaluation)
+                    else:
+                        raise ValueError("No JSON object found")
+                except Exception:
+                    # Fallback to text response
+                    evaluation = {
+                        "score": 5,
+                        "strengths": ["Unable to parse structured feedback"],
+                        "weaknesses": ["Unable to parse structured feedback"],
+                        "feedback": text,
+                        "example_improvement": "N/A",
+                        "why_asked": ""
+                    }
+                    logger.info("Using fallback evaluation (text only)")
         
         # Store feedback in history
         self.feedback_history.append(evaluation)
