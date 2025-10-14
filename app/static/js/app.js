@@ -128,6 +128,11 @@ const voiceActivityLabel = voiceActivityIndicator
 const exportTranscriptBtn = document.getElementById('export-transcript');
 const voiceSummaryCoachLevel = document.getElementById('voice-summary-coach-level');
 const voiceSummaryVoice = document.getElementById('voice-summary-voice');
+// Legacy controls removed from main panel (keep placeholders to avoid ReferenceError)
+const voiceSelect = null;
+const voicePreviewBtn = null;
+const voiceSaveBtn = null;
+const voicePreviewAudio = null;
 // Voice submission button (parity with typed Submit)
 const submitVoiceBtn = document.getElementById('submit-voice-answer');
 const muteVoiceBtn = document.getElementById('mute-voice');
