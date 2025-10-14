@@ -1668,7 +1668,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 const r = await fetch(`/session/${state.sessionId}/voice`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ voice_id: voiceId }) });
                 if (!r.ok) throw new Error(await r.text());
                 if (voiceSelect) voiceSelect.value = voiceId;
-                alert('Voice saved. New prompts will use this voice.');
+                // Offer to apply immediately by restarting the voice session
+                let applied = false;
+                if (state.voice && state.voice.peer) {
+                    applied = confirm('Voice saved. Restart the voice session now to apply the new voice?');
+                    if (applied) {
+                        try { stopVoiceInterview({ silent: true }); } catch (_) {}
+                        setTimeout(() => startVoiceInterview(), 150);
+                    }
+                }
+                if (!applied) alert('Voice saved. New prompts will use this voice.');
             } catch (err) {
                 alert(err.message || 'Unable to save voice');
             }
@@ -1847,7 +1856,16 @@ async function initVoiceSelector() {
                 if (typeof voiceSelect2 !== 'undefined' && voiceSelect2) {
                     voiceSelect2.value = voiceId;
                 }
-                alert('Voice saved. New prompts will use this voice.');
+                // Offer to apply immediately by restarting the voice session
+                let applied = false;
+                if (state.voice && state.voice.peer) {
+                    applied = confirm('Voice saved. Restart the voice session now to apply the new voice?');
+                    if (applied) {
+                        try { stopVoiceInterview({ silent: true }); } catch (_) {}
+                        setTimeout(() => startVoiceInterview(), 150);
+                    }
+                }
+                if (!applied) alert('Voice saved. New prompts will use this voice.');
             } catch (err) {
                 alert(err.message || 'Unable to save voice');
             }
