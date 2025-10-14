@@ -114,6 +114,14 @@ Notes
 - `scripts/codex_up.sh`: One‑step venv + install + start/tests (Codex‑friendly).
 - `scripts/install_git_conventions.sh`: Installs a commit template and a pre‑commit guard.
 
+### Demo Checklist (stage)
+- See `docs/DEMO_STAGE_VOICE_SETTINGS.md` for a short demo with screenshots covering:
+  - Voice settings drawer loading/error/retry
+  - Voice preview fallback
+  - Save + immediate apply to live session
+  - Submit Voice Answer flow
+  - Question rail/drawer and Sessions modal
+
 ## Realtime Voice Interviews
 - Upload your resume and job description to start a session, then click **Start Voice Session** to open a WebRTC call with the `gpt-realtime-mini-2025-10-06` coach.
 - The browser will prompt for microphone access—grant permission so the agent can hear you.
