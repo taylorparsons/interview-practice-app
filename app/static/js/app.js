@@ -166,6 +166,8 @@ const voiceSelect2 = document.getElementById('voice-select-2');
 const voicePreviewBtn2 = document.getElementById('voice-preview-2');
 const voiceSaveBtn2 = document.getElementById('voice-save-2');
 const voicePreviewAudio2 = document.getElementById('voice-preview-audio-2');
+const voiceSelect2Status = document.getElementById('voice-select-2-status');
+const voiceSelect2Retry = document.getElementById('voice-select-2-retry');
 
 const voiceStatusClasses = {
     idle: 'text-gray-500',
@@ -1582,7 +1584,10 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
     if (openSettingsBtn && voiceSettingsDrawer) {
-        openSettingsBtn.addEventListener('click', () => { syncVoiceSettingsDrawer(); voiceSettingsDrawer.classList.remove('hidden'); });
+        openSettingsBtn.addEventListener('click', async () => {
+            await populateVoiceSettingsDrawer();
+            voiceSettingsDrawer.classList.remove('hidden');
+        });
     }
     if (sessionsCloseBtn && sessionsModal) {
         sessionsCloseBtn.addEventListener('click', () => sessionsModal.classList.add('hidden'));
@@ -1641,7 +1646,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (nextQuestionFooterBtn) nextQuestionFooterBtn.addEventListener('click', handleNextQuestion);
     if (markReviewBtn) markReviewBtn.addEventListener('click', toggleMarkForReview);
     if (openVoiceSettingsBtn && voiceSettingsDrawer) {
-        openVoiceSettingsBtn.addEventListener('click', () => { syncVoiceSettingsDrawer(); voiceSettingsDrawer.classList.remove('hidden'); });
+        openVoiceSettingsBtn.addEventListener('click', async () => {
+            await populateVoiceSettingsDrawer();
+            voiceSettingsDrawer.classList.remove('hidden');
+        });
     }
     if (closeVoiceSettingsBtn && voiceSettingsDrawer) {
         closeVoiceSettingsBtn.addEventListener('click', () => voiceSettingsDrawer.classList.add('hidden'));
@@ -1649,9 +1657,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // Drawer: preview and save
     if (voicePreviewBtn2 && voiceSelect2 && voicePreviewAudio2) {
         voicePreviewBtn2.addEventListener('click', async () => {
-            syncVoiceSettingsDrawer();
+            await populateVoiceSettingsDrawer();
             const opt = voiceSelect2.options[voiceSelect2.selectedIndex];
-            const url = opt && opt.dataset.previewUrl;
+            let url = opt && opt.dataset.previewUrl;
+            if (!url && opt && opt.value) url = `/voices/preview/${encodeURIComponent(opt.value)}`;
             if (!url) return alert('No preview available for this voice.');
             try {
                 voicePreviewAudio2.src = url;
@@ -1774,9 +1783,7 @@ function setupEventListeners() {
 
 async function initVoiceSelector() {
     try {
-        const res = await fetch('/voices');
-        if (!res.ok) throw new Error('Failed to load voices');
-        const voices = await res.json();
+        const voices = await ensureVoicesCatalog();
         if (voiceSelect) {
             while (voiceSelect.firstChild) voiceSelect.removeChild(voiceSelect.firstChild);
             voices.forEach(v => {
@@ -1812,7 +1819,8 @@ async function initVoiceSelector() {
             voicePreviewBtn.addEventListener('click', async (e) => {
                 e.preventDefault();
                 const opt = voiceSelect.options[voiceSelect.selectedIndex];
-                const url = opt && opt.dataset.previewUrl;
+                let url = opt && opt.dataset.previewUrl;
+                if (!url && opt && opt.value) url = `/voices/preview/${encodeURIComponent(opt.value)}`; // fallback
                 if (!url) {
                     alert('No preview available for this voice.');
                     return;
@@ -1833,47 +1841,67 @@ async function initVoiceSelector() {
                 }
             });
         }
-    if (voiceSaveBtn && voiceSelect) {
-        voiceSaveBtn.addEventListener('click', async (e) => {
-            e.preventDefault();
-            if (!state.sessionId) {
-                alert('Start or resume a session first.');
-                return;
-            }
-            const voiceId = voiceSelect.value;
-            if (!voiceId) return;
-            try {
-                const r = await fetch(`/session/${state.sessionId}/voice`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ voice_id: voiceId })
-                });
-                if (!r.ok) {
-                    const detail = await r.text();
-                    throw new Error(detail || 'Failed to save voice');
+        if (voiceSaveBtn && voiceSelect) {
+            voiceSaveBtn.addEventListener('click', async (e) => {
+                e.preventDefault();
+                if (!state.sessionId) {
+                    alert('Start or resume a session first.');
+                    return;
                 }
-                // Mirror selection into the drawer select if present
-                if (typeof voiceSelect2 !== 'undefined' && voiceSelect2) {
-                    voiceSelect2.value = voiceId;
-                }
-                // Offer to apply immediately by restarting the voice session
-                let applied = false;
-                if (state.voice && state.voice.peer) {
-                    applied = confirm('Voice saved. Restart the voice session now to apply the new voice?');
-                    if (applied) {
-                        try { stopVoiceInterview({ silent: true }); } catch (_) {}
-                        setTimeout(() => startVoiceInterview(), 150);
+                const voiceId = voiceSelect.value;
+                if (!voiceId) return;
+                try {
+                    const r = await fetch(`/session/${state.sessionId}/voice`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ voice_id: voiceId })
+                    });
+                    if (!r.ok) {
+                        const detail = await r.text();
+                        throw new Error(detail || 'Failed to save voice');
                     }
+                    // Mirror selection into the drawer select if present
+                    if (voiceSelect2) {
+                        voiceSelect2.value = voiceId;
+                    }
+                    // Offer to apply immediately by restarting the voice session
+                    let applied = false;
+                    if (state.voice && state.voice.peer) {
+                        applied = confirm('Voice saved. Restart the voice session now to apply the new voice?');
+                        if (applied) {
+                            try { stopVoiceInterview({ silent: true }); } catch (_) {}
+                            setTimeout(() => startVoiceInterview(), 150);
+                        }
+                    }
+                    if (!applied) alert('Voice saved. New prompts will use this voice.');
+                } catch (err) {
+                    alert(err.message || 'Unable to save voice');
                 }
-                if (!applied) alert('Voice saved. New prompts will use this voice.');
-            } catch (err) {
-                alert(err.message || 'Unable to save voice');
-            }
-        });
-    }
+            });
+        }
     } catch (err) {
         console.warn('Voice catalog unavailable:', err);
     }
+}
+
+// Shared voices loader with cache + retry
+let __voicesCache = null;
+let __voicesPromise = null;
+async function ensureVoicesCatalog(force = false) {
+    if (!force && __voicesCache && Array.isArray(__voicesCache) && __voicesCache.length > 0) {
+        return __voicesCache;
+    }
+    if (!force && __voicesPromise) return __voicesPromise;
+    __voicesPromise = (async () => {
+        const res = await fetch('/voices');
+        if (!res.ok) throw new Error('Failed to load voices');
+        const list = await res.json();
+        __voicesCache = Array.isArray(list) ? list : [];
+        return __voicesCache;
+    })().finally(() => {
+        __voicesPromise = null;
+    });
+    return __voicesPromise;
 }
 
 async function initCoachLevelSelector() {
@@ -3101,15 +3129,49 @@ function syncVoiceSettingsDrawer() {
     if (toggleBrowserAsr2) toggleBrowserAsr2.checked = !!(state.voice.config && state.voice.config.useBrowserAsr);
     if (toggleShowMetadata2) toggleShowMetadata2.checked = !!(state.voice.config && state.voice.config.showMetadata);
     if (coachLevelSelect && coachLevelSelect2) coachLevelSelect2.value = coachLevelSelect.value;
-    // Populate voices into drawer select if empty
-    if (voiceSelect && voiceSelect2 && voiceSelect2.options.length <= 1 && voiceSelect.options.length > 0) {
-        voiceSelect2.innerHTML = '';
-        Array.from(voiceSelect.options).forEach(opt => {
-            const o = document.createElement('option');
-            o.value = opt.value; o.textContent = opt.textContent; if (opt.dataset.previewUrl) o.dataset.previewUrl = opt.dataset.previewUrl;
-            voiceSelect2.appendChild(o);
-        });
-        voiceSelect2.value = voiceSelect.value;
+    // Voices population handled by populateVoiceSettingsDrawer()
+}
+
+async function populateVoiceSettingsDrawer() {
+    if (voiceSelect2Status) {
+        voiceSelect2Status.textContent = 'Loading voices…';
+        voiceSelect2Status.className = 'text-xs text-gray-500';
+    }
+    if (voiceSelect2Retry) voiceSelect2Retry.classList.add('hidden');
+    try {
+        const voices = await ensureVoicesCatalog();
+        if (voiceSelect2) {
+            voiceSelect2.innerHTML = '';
+            if (voices.length === 0) {
+                const opt = document.createElement('option');
+                opt.value = '';
+                opt.textContent = 'No voices available';
+                voiceSelect2.appendChild(opt);
+            } else {
+                voices.forEach(v => {
+                    const o = document.createElement('option');
+                    o.value = v.id;
+                    o.textContent = v.label || v.id;
+                    if (v.preview_url) o.dataset.previewUrl = v.preview_url;
+                    voiceSelect2.appendChild(o);
+                });
+                // default to main select selection if any
+                if (voiceSelect && voiceSelect.value) voiceSelect2.value = voiceSelect.value;
+            }
+        }
+        syncVoiceSettingsDrawer();
+        if (voiceSelect2Status) voiceSelect2Status.textContent = '';
+    } catch (err) {
+        if (voiceSelect2Status) {
+            voiceSelect2Status.textContent = 'Failed to load voices.';
+            voiceSelect2Status.className = 'text-xs text-rose-600';
+        }
+        if (voiceSelect2Retry) {
+            voiceSelect2Retry.classList.remove('hidden');
+            voiceSelect2Retry.onclick = async () => {
+                await populateVoiceSettingsDrawer();
+            };
+        }
     }
 }
 
