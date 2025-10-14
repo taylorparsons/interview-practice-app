@@ -1,0 +1,15 @@
+@startsalt
+{
+  {T} Sessions
+  [ Search ______________________________________ ]
+  --
+  "Saved" {
+    * ai_product_manager_submitted_resume   • 5 q  • Updated 2h ago   [ Load ] [ Rename ] [ Delete ]
+    * ds_lead_enterprise                     • 7 q  • Updated 1d ago   [ Load ] [ Rename ] [ Delete ]
+    * swe_fullstack_cloud                    • 5 q  • Updated 3d ago   [ Load ] [ Rename ] [ Delete ]
+  }
+  --
+  [ New Interview ] | [ Close ]
+}
+@endsalt
+

@@ -9,9 +9,24 @@
 </head>
 <body class="bg-gray-100 min-h-screen">
     <div class="container mx-auto px-4 py-8">
-        <header class="mb-10 text-center">
-            <h1 class="text-3xl font-bold text-indigo-700">Interview Practice App</h1>
-            <p class="text-gray-600">Upload your resume and a job description to practice interviewing</p>
+        <header class="mb-6">
+            <div class="text-center mb-3">
+                <h1 class="text-3xl font-bold text-indigo-700">Interview Practice App</h1>
+                <p class="text-gray-600">Upload your resume and a job description to practice interviewing</p>
+            </div>
+            <!-- Global App Bar -->
+            <div class="flex items-center justify-between bg-white border border-indigo-100 rounded-md px-4 py-2 shadow-sm">
+                <div class="flex items-center gap-2 text-sm text-gray-600">
+                    <button id="global-new-interview" class="inline-flex items-center py-1.5 px-3 rounded-md text-white bg-indigo-600 hover:bg-indigo-700">New Interview</button>
+                    <button id="global-sessions" class="inline-flex items-center py-1.5 px-3 rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-50">Sessions</button>
+                    <button id="global-settings" class="inline-flex items-center py-1.5 px-3 rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-50">Settings</button>
+                </div>
+                <div class="hidden sm:flex items-center gap-3 text-sm text-gray-600">
+                    <span>Session: <span id="session-name" class="font-medium text-indigo-700"></span></span>
+                    <span>Question <span id="question-position">–</span></span>
+                    <button type="button" id="view-docs" class="inline-flex justify-center py-1 px-3 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">View Docs</button>
+                </div>
+            </div>
         </header>
 
         <main>
@@ -41,7 +56,7 @@
                     </div>
                 </div>
                 <h2 class="text-xl font-semibold mb-4">Upload Documents</h2>
-                <form id="upload-form" class="space-y-4">
+                <form id="upload-form" class="space-y-4" method="post" action="/upload-documents" enctype="multipart/form-data">
                     <div>
                         <label for="resume" class="block text-sm font-medium text-gray-700">Your Resume</label>
                         <input type="file" id="resume" name="resume" accept=".pdf,.docx,.txt" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
@@ -75,9 +90,9 @@
                 <div class="bg-white p-6 rounded-lg shadow-md mb-8">
                     <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
                         <h2 class="text-xl font-semibold">Interview Practice</h2>
-                        <div class="text-sm text-gray-600">
-                            <span class="mr-3">Session: <span id="session-name" class="font-medium text-indigo-700"></span></span>
-                            <span>Question <span id="question-position">–</span></span>
+                        <div class="text-sm text-gray-600 sm:hidden">
+                            <span class="mr-3">Session: <span id="session-name-mobile" class="font-medium text-indigo-700"></span></span>
+                            <span>Question <span id="question-position-mobile">–</span></span>
                         </div>
                     </div>
 
@@ -86,7 +101,7 @@
                         <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-3">
                             <select id="switch-sessions" class="flex-1 px-3 py-2 border border-indigo-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"></select>
                             <button type="button" id="switch-session" class="inline-flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">Switch</button>
-                            <button type="button" id="view-docs" class="inline-flex justify-center py-2 px-4 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">View Docs</button>
+                            <button type="button" id="open-question-drawer" class="inline-flex justify-center py-2 px-4 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">Questions</button>
                         </div>
                         
                         <!-- Collapsible documents panel -->
@@ -102,7 +117,21 @@
                         </div>
                     </div>
                     
-                    <div id="interview-container" class="space-y-6">
+                    <!-- Two-column layout: left rail + main -->
+                    <div class="grid grid-cols-12 gap-6">
+                    <!-- Question rail (desktop) -->
+                    <aside id="question-rail" class="hidden md:block md:col-span-3">
+                        <div class="p-3 bg-white border border-gray-200 rounded-md">
+                            <div class="flex items-center justify-between mb-2">
+                                <h4 class="font-medium text-gray-800">Questions</h4>
+                                <span id="progress-mini" class="text-xs text-gray-500"></span>
+                            </div>
+                            <ul id="question-rail-list" class="space-y-1 text-sm"></ul>
+                        </div>
+                    </aside>
+
+                    <!-- Main content -->
+                    <div id="interview-container" class="col-span-12 md:col-span-9 space-y-6">
                     <div id="question-container" class="p-4 bg-indigo-50 rounded-lg">
                         <h3 class="font-medium text-indigo-700 mb-2">Question</h3>
                         <p id="current-question" class="text-gray-800"></p>
@@ -124,15 +153,21 @@
                             <button id="stop-voice" class="hidden inline-flex justify-center items-center py-2 px-4 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
                                 Stop Voice Session
                             </button>
+                            <button id="mute-voice" class="hidden inline-flex justify-center items-center py-2 px-3 border border-gray-300 text-xs font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">Mute</button>
+                            <button id="submit-voice-answer" disabled class="inline-flex justify-center items-center py-2 px-3 border border-indigo-300 text-xs font-medium rounded-md text-indigo-700 bg-indigo-50 hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500" title="Submit your spoken response for evaluation">
+                                Submit Voice Answer
+                            </button>
                             <button id="export-transcript" class="inline-flex justify-center items-center py-2 px-3 border border-gray-300 text-xs font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500" title="Download full transcript">
                                 Export Transcript
                             </button>
+                            <button id="open-voice-settings" class="inline-flex justify-center items-center py-2 px-3 border border-gray-300 text-xs font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">Settings</button>
                         </div>
                         <div id="voice-activity-indicator" class="mt-2 flex items-center text-xs text-gray-500 space-x-2">
                             <span data-indicator-dot class="inline-flex h-2.5 w-2.5 rounded-full bg-gray-300 transition"></span>
                             <span data-indicator-label>Mic idle</span>
                         </div>
-                        <div class="mt-2 flex flex-wrap items-center gap-4 text-xs text-gray-600">
+                        <!-- Pre-call voice settings row (visible before start; hidden while live) -->
+                        <div id="voice-settings-pre" class="mt-2 flex flex-wrap items-center gap-4 text-xs text-gray-600 hidden">
                             <label class="inline-flex items-center gap-2">
                                 <input id="toggle-browser-asr" type="checkbox" class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
                                 <span>Browser transcription fallback</span>
@@ -191,8 +226,9 @@
                         <div class="w-full bg-gray-200 rounded-full h-2.5 mt-2">
                             <div id="score-bar" class="bg-indigo-600 h-2.5 rounded-full" style="width: 0%"></div>
                         </div>
-                    </div>
-                    
+                    </div> <!-- /main content col -->
+                    </div> <!-- /grid -->
+
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                         <div class="p-4 bg-green-50 rounded-lg">
                             <h4 class="font-medium text-green-700 mb-2">Strengths</h4>
@@ -280,8 +316,94 @@
                     <!-- Per-question detailed cards -->
                     <div id="per-question-cards" class="mt-8 space-y-4"></div>
                 </div>
+
+                <!-- Sticky footer controls -->
+                <div id="footer-controls" class="sticky bottom-0 py-3 mt-6 bg-gray-50 border-t border-gray-200">
+                    <div class="flex items-center justify-between gap-3">
+                        <button id="prev-question" class="inline-flex justify-center items-center py-2 px-4 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">◀ Prev</button>
+                        <button id="mark-review" class="inline-flex justify-center items-center py-2 px-4 border border-amber-300 text-sm font-medium rounded-md text-amber-700 bg-amber-50 hover:bg-amber-100">Mark for review</button>
+                        <button id="next-question-footer" class="inline-flex justify-center items-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700">Next ▶</button>
+                    </div>
+                </div>
             </section>
         </main>
+    </div>
+
+    <!-- Question Map Drawer (mobile) -->
+    <div id="question-drawer" class="fixed inset-0 bg-black bg-opacity-30 hidden">
+        <div class="absolute right-0 top-0 bottom-0 w-full max-w-md bg-white shadow-xl p-4 overflow-y-auto">
+            <div class="flex items-center justify-between mb-3">
+                <h4 class="font-medium text-gray-800">Questions</h4>
+                <button id="close-question-drawer" class="py-1 px-2 border border-gray-300 rounded-md text-sm">Close</button>
+            </div>
+            <ul id="question-drawer-list" class="space-y-1 text-sm"></ul>
+        </div>
+    </div>
+
+    <!-- Voice Settings Drawer (in-call) -->
+    <div id="voice-settings-drawer" class="fixed inset-0 bg-black bg-opacity-30 hidden">
+        <div class="absolute right-0 top-0 bottom-0 w-full max-w-md bg-white shadow-xl p-4 overflow-y-auto">
+            <div class="flex items-center justify-between mb-3">
+                <h4 class="font-medium text-gray-800">Voice Settings</h4>
+                <button id="close-voice-settings" class="py-1 px-2 border border-gray-300 rounded-md text-sm">Close</button>
+            </div>
+            <div class="flex flex-col gap-3 text-sm text-gray-700">
+                <label class="inline-flex items-center gap-2">
+                    <input id="toggle-browser-asr-2" type="checkbox" class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
+                    <span>Browser transcription fallback</span>
+                </label>
+                <label class="inline-flex items-center gap-2">
+                    <input id="toggle-show-metadata-2" type="checkbox" class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
+                    <span>Show transcript metadata</span>
+                </label>
+                <div class="inline-flex items-center gap-2">
+                    <label for="coach-level-select-2" class="text-gray-600">Coaching Level</label>
+                    <select id="coach-level-select-2" class="border border-gray-300 rounded-md text-xs py-1 px-2">
+                        <option value="level_1">Help</option>
+                        <option value="level_2">Strict</option>
+                    </select>
+                    <button id="coach-level-save-2" class="py-1 px-2 border border-indigo-300 rounded-md bg-indigo-50 text-indigo-700 hover:bg-indigo-100">Save</button>
+                </div>
+                <div class="inline-flex items-center gap-2">
+                    <label for="voice-select-2" class="text-gray-600">Voice</label>
+                    <select id="voice-select-2" class="border border-gray-300 rounded-md text-xs py-1 px-2">
+                        <option value="">Loading…</option>
+                    </select>
+                    <button id="voice-preview-2" class="py-1 px-2 border border-gray-300 rounded-md bg-white hover:bg-gray-50">Preview</button>
+                    <button id="voice-save-2" class="py-1 px-2 border border-indigo-300 rounded-md bg-indigo-50 text-indigo-700 hover:bg-indigo-100">Save</button>
+                    <audio id="voice-preview-audio-2" class="hidden"></audio>
+                </div>
+                <div id="voice-select-2-status" class="text-xs text-gray-500"></div>
+                <div>
+                    <button id="voice-select-2-retry" class="hidden mt-1 py-1 px-2 border border-gray-300 rounded-md text-xs">Retry loading voices</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sessions Modal -->
+    <div id="sessions-modal" class="fixed inset-0 bg-black bg-opacity-30 hidden">
+        <div class="absolute inset-0 flex items-start justify-center p-6">
+            <div class="w-full max-w-2xl bg-white rounded-md shadow-xl p-4">
+                <div class="flex items-center justify-between mb-3">
+                    <h4 class="font-medium text-gray-800">Sessions</h4>
+                    <button id="close-sessions" class="py-1 px-2 border border-gray-300 rounded-md text-sm">Close</button>
+                </div>
+                <div class="flex items-center gap-2 mb-3">
+                    <input id="sessions-search" placeholder="Search sessions…" class="flex-1 px-3 py-2 border border-gray-300 rounded-md" />
+                    <button id="sessions-refresh" class="py-1.5 px-3 border border-gray-300 rounded-md text-sm">Refresh</button>
+                </div>
+                <div class="flex items-center gap-2 mb-3">
+                    <select id="sessions-modal-select" class="flex-1 px-3 py-2 border border-gray-300 rounded-md"></select>
+                    <button id="sessions-load" class="py-1.5 px-3 rounded-md text-white bg-indigo-600">Load</button>
+                    <button id="sessions-rename" class="py-1.5 px-3 rounded-md border border-gray-300">Rename</button>
+                    <button id="sessions-delete" class="py-1.5 px-3 rounded-md border border-rose-300 text-rose-700">Delete</button>
+                </div>
+                <div class="flex items-center gap-2">
+                    <input id="sessions-rename-input" placeholder="Rename selected session" class="flex-1 px-3 py-2 border border-gray-300 rounded-md" />
+                </div>
+            </div>
+        </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/livekit-client/dist/livekit-client.umd.js"></script>

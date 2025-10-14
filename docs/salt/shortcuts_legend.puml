@@ -1,0 +1,12 @@
+@startsalt
+{
+  {T} Shortcuts
+  [ J / ← ] | {T} Previous question
+  [ K / → ] | {T} Next question
+  [ V ]     | {T} Start/Stop voice
+  [ M ]     | {T} Mute/Unmute
+  [ E ]     | {T} Export transcript
+  [ G ]     | {T} Open Question Map
+}
+@endsalt
+

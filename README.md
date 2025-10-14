@@ -107,12 +107,24 @@ Options and env vars
 Notes
 - Voice features (realtime + previews) require `OPENAI_API_KEY` in `.env`. If missing, the server still starts but voice endpoints will return 5xx when invoked.
 - Use `scripts/codex_up.sh` in constrained environments or CI. Use `run_voice.sh` for a stricter voice-first workflow that enforces the API key.
+- Voice transcription defaults (browser fallback + metadata display) are now controlled via `.env` instead of runtime toggles:
+  - `VOICE_BROWSER_FALLBACK_DEFAULT` (bool, default `false`) – when `true`, the browser speech-recognition fallback auto-starts during voice sessions.
+  - `VOICE_SHOW_METADATA_DEFAULT` (bool, default `false`) – when `true`, transcript bubbles show timestamp/confidence/source metadata.
+  - These values are injected into `window.APP_CONFIG.voice` so the client respects the server configuration without extra UI toggles.
 
 ## Helper Scripts
 - `./run_voice.sh`: Boots the FastAPI server with realtime voice defaults. Add `--no-reload` to disable auto-reload or `--python 3.11` to prefer a specific Python version.
 - `./test.sh`: Runs the test suite with `pytest -q`. Use `--health` to ping the running server (`http://localhost:8000` by default) after tests, or override the health-check target with `--url <base_url>`.
 - `scripts/codex_up.sh`: One‑step venv + install + start/tests (Codex‑friendly).
 - `scripts/install_git_conventions.sh`: Installs a commit template and a pre‑commit guard.
+
+### Demo Checklist (stage)
+- See `docs/DEMO_STAGE_VOICE_SETTINGS.md` for a short demo with screenshots covering:
+  - Voice settings drawer loading/error/retry
+  - Voice preview fallback
+  - Save + immediate apply to live session
+  - Submit Voice Answer flow
+  - Question rail/drawer and Sessions modal
 
 ## Realtime Voice Interviews
 - Upload your resume and job description to start a session, then click **Start Voice Session** to open a WebRTC call with the `gpt-realtime-mini-2025-10-06` coach.

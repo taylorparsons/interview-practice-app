@@ -39,6 +39,10 @@ function createInitialState() {
         currentQuestionIndex: 0,
         answers: [],
         evaluations: [],
+        reviewFlags: {},
+        coachLevel: 'level_1',
+        resumeText: '',
+        jobDescText: '',
         room: null,
         participant: null,
         isRecording: false,
@@ -64,6 +68,10 @@ const viewDocsBtn = document.getElementById('view-docs');
 const resumeDocEl = document.getElementById('resume-doc');
 const jobDocEl = document.getElementById('jobdoc-doc');
 const resumeActions = document.getElementById('resume-actions');
+// App bar controls
+const newInterviewBtn = document.getElementById('global-new-interview');
+const openSessionsBtn = document.getElementById('global-sessions');
+const openSettingsBtn = document.getElementById('global-settings');
 // Manual answer UI controls (hidden during live voice)
 const answerLabel = document.querySelector('label[for="answer"]');
 const resumeSessionBtn = document.getElementById('resume-session');
@@ -126,6 +134,43 @@ const voicePreviewAudio = document.getElementById('voice-preview-audio');
 // Coaching level controls
 const coachLevelSelect = document.getElementById('coach-level-select');
 const coachLevelSaveBtn = document.getElementById('coach-level-save');
+// Voice submission button (parity with typed Submit)
+const submitVoiceBtn = document.getElementById('submit-voice-answer');
+const muteVoiceBtn = document.getElementById('mute-voice');
+// Question rail & drawer
+const questionRailList = document.getElementById('question-rail-list');
+const questionDrawer = document.getElementById('question-drawer');
+const questionDrawerList = document.getElementById('question-drawer-list');
+const openQuestionDrawerBtn = document.getElementById('open-question-drawer');
+const closeQuestionDrawerBtn = document.getElementById('close-question-drawer');
+// Footer controls
+const prevQuestionBtn = document.getElementById('prev-question');
+const markReviewBtn = document.getElementById('mark-review');
+const nextQuestionFooterBtn = document.getElementById('next-question-footer');
+// Sessions modal
+const sessionsModal = document.getElementById('sessions-modal');
+const sessionsSearch = document.getElementById('sessions-search');
+const sessionsRefresh = document.getElementById('sessions-refresh');
+const sessionsModalSelect = document.getElementById('sessions-modal-select');
+const sessionsLoadBtn = document.getElementById('sessions-load');
+const sessionsRenameBtn = document.getElementById('sessions-rename');
+const sessionsDeleteBtn = document.getElementById('sessions-delete');
+const sessionsRenameInput = document.getElementById('sessions-rename-input');
+const sessionsCloseBtn = document.getElementById('close-sessions');
+// Voice settings drawer
+const openVoiceSettingsBtn = document.getElementById('open-voice-settings');
+const voiceSettingsDrawer = document.getElementById('voice-settings-drawer');
+const closeVoiceSettingsBtn = document.getElementById('close-voice-settings');
+const toggleBrowserAsr2 = document.getElementById('toggle-browser-asr-2');
+const toggleShowMetadata2 = document.getElementById('toggle-show-metadata-2');
+const coachLevelSelect2 = document.getElementById('coach-level-select-2');
+const coachLevelSaveBtn2 = document.getElementById('coach-level-save-2');
+const voiceSelect2 = document.getElementById('voice-select-2');
+const voicePreviewBtn2 = document.getElementById('voice-preview-2');
+const voiceSaveBtn2 = document.getElementById('voice-save-2');
+const voicePreviewAudio2 = document.getElementById('voice-preview-audio-2');
+const voiceSelect2Status = document.getElementById('voice-select-2-status');
+const voiceSelect2Retry = document.getElementById('voice-select-2-retry');
 
 const voiceStatusClasses = {
     idle: 'text-gray-500',
@@ -170,6 +215,12 @@ function setVoiceLayout(isLive) {
         voiceTranscript.classList.toggle('max-h-64', !isLive);
         voiceTranscript.classList.toggle('max-h-96', isLive);
     }
+    // Toggle visibility of pre-call settings and inline mute
+    const voicePre = document.getElementById('voice-settings-pre');
+    if (voicePre) voicePre.classList.toggle('hidden', isLive);
+    if (muteVoiceBtn) muteVoiceBtn.classList.toggle('hidden', !isLive);
+    // Re-evaluate whether the voice transcript is ready to submit
+    try { updateVoiceSubmitAvailability(); } catch (_) {}
 }
 
 function setVoiceEnabled(enabled) {
@@ -204,6 +255,7 @@ function clearVoiceTranscript() {
     voiceTranscript.dataset.empty = 'true';
     voiceTranscript.innerHTML = '<p class="text-xs text-gray-500">Voice transcripts will appear here once the realtime session begins.</p>';
     setVoiceActivityIndicator('idle');
+    try { updateVoiceSubmitAvailability(); } catch (_) {}
 }
 
 const voiceRoleToBackend = {
@@ -484,6 +536,7 @@ function handleUserTranscriptChunk(transcript, options = {}) {
         if (Number.isInteger(questionIndex)) {
             state.voice.transcriptsByIndex[questionIndex] = active.text;
         }
+        try { updateVoiceSubmitAvailability(); } catch (_) {}
         return;
     }
 
@@ -545,6 +598,7 @@ function handleUserTranscriptChunk(transcript, options = {}) {
         state.voice.userStream = null;
         state.voice.lastUserFinalNormalized = currentNorm;
         state.voice.lastFinalSpeaker = 'user';
+        try { updateVoiceSubmitAvailability(); } catch (_) {}
     }
 }
 
@@ -745,6 +799,7 @@ function finalizeAgentMessage() {
     state.voice.agentStream = null;
     state.voice.transcriptBuffer = '';
     if (state.voice) { state.voice.lastFinalSpeaker = 'agent'; }
+    try { updateVoiceSubmitAvailability(); } catch (_) {}
 }
 
 function handleVoiceEvent(event) {
@@ -1221,6 +1276,71 @@ function stopVoiceInterview(options = {}) {
 
     setVoiceControls(false);
     setVoiceLayout(false);
+    try { updateVoiceSubmitAvailability(); } catch (_) {}
+}
+
+function updateVoiceSubmitAvailability() {
+    if (!submitVoiceBtn || !state || !state.voice) return;
+    const idx = state.currentQuestionIndex;
+    const t = Number.isInteger(idx) && state.voice.transcriptsByIndex
+        ? (state.voice.transcriptsByIndex[idx] || '')
+        : '';
+    const ready = typeof t === 'string' && t.trim().length >= 10; // minimal threshold
+    submitVoiceBtn.disabled = !ready;
+    submitVoiceBtn.classList.toggle('opacity-50', !ready);
+    submitVoiceBtn.classList.toggle('cursor-not-allowed', !ready);
+}
+
+async function handleVoiceAnswerSubmission() {
+    if (!state || !state.sessionId) {
+        alert('Start or resume a session first.');
+        return;
+    }
+    const idx = state.currentQuestionIndex;
+    const question = state.questions[idx];
+    const transcript = (state.voice && state.voice.transcriptsByIndex && Number.isInteger(idx))
+        ? (state.voice.transcriptsByIndex[idx] || '').trim()
+        : '';
+    if (!transcript) {
+        alert('No voice transcript available yet. Speak your answer, then submit.');
+        return;
+    }
+    if (state.isRecording) {
+        try { stopRecording(); } catch (_) {}
+    }
+    const orig = submitVoiceBtn ? submitVoiceBtn.textContent : '';
+    if (submitVoiceBtn) { submitVoiceBtn.disabled = true; submitVoiceBtn.textContent = 'Submitting…'; }
+    try {
+        const res = await fetch('/evaluate-answer', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                session_id: state.sessionId,
+                question,
+                answer: transcript,
+                voice_transcript: transcript,
+            })
+        });
+        if (!res.ok) {
+            const errText = await res.text();
+            throw new Error(errText || 'Failed to submit voice answer');
+        }
+        const data = await res.json();
+        const evaluation = data && data.evaluation ? data.evaluation : null;
+        if (evaluation) {
+            state.answers.push({ question, answer: transcript });
+            state.evaluations.push(evaluation);
+            displayFeedback(evaluation);
+        } else {
+            alert('No evaluation returned.');
+        }
+    } catch (err) {
+        console.error('Voice submit error:', err);
+        alert('Unable to submit voice answer.');
+    } finally {
+        if (submitVoiceBtn) { submitVoiceBtn.textContent = orig; }
+        updateVoiceSubmitAvailability();
+    }
 }
 
 // Speech Recognition Setup
@@ -1450,6 +1570,131 @@ document.addEventListener('DOMContentLoaded', () => {
     if (exportTranscriptBtn) {
         exportTranscriptBtn.addEventListener('click', exportFullTranscript);
     }
+    if (submitVoiceBtn) {
+        submitVoiceBtn.addEventListener('click', handleVoiceAnswerSubmission);
+        try { updateVoiceSubmitAvailability(); } catch (_) {}
+    }
+    if (muteVoiceBtn) {
+        muteVoiceBtn.addEventListener('click', toggleMuteVoice);
+    }
+    if (newInterviewBtn) {
+        newInterviewBtn.addEventListener('click', startNewInterviewFlow);
+    }
+    if (openSessionsBtn && sessionsModal) {
+        openSessionsBtn.addEventListener('click', async () => {
+            await refreshSessionsModalList('');
+            sessionsModal.classList.remove('hidden');
+        });
+    }
+    if (openSettingsBtn && voiceSettingsDrawer) {
+        openSettingsBtn.addEventListener('click', async () => {
+            await populateVoiceSettingsDrawer();
+            voiceSettingsDrawer.classList.remove('hidden');
+        });
+    }
+    if (sessionsCloseBtn && sessionsModal) {
+        sessionsCloseBtn.addEventListener('click', () => sessionsModal.classList.add('hidden'));
+    }
+    if (sessionsRefresh) {
+        sessionsRefresh.addEventListener('click', async () => refreshSessionsModalList(sessionsSearch && sessionsSearch.value || ''));
+    }
+    if (sessionsSearch) {
+        sessionsSearch.addEventListener('input', async () => refreshSessionsModalList(sessionsSearch.value || ''));
+    }
+    if (sessionsLoadBtn) {
+        sessionsLoadBtn.addEventListener('click', async () => {
+            const id = sessionsModalSelect && sessionsModalSelect.value;
+            if (!id) return;
+            sessionsModal.classList.add('hidden');
+            await resumeSavedSessionById(id);
+        });
+    }
+    if (sessionsRenameBtn) {
+        sessionsRenameBtn.addEventListener('click', async () => {
+            const id = sessionsModalSelect && sessionsModalSelect.value;
+            const name = sessionsRenameInput && sessionsRenameInput.value.trim();
+            if (!id || !name) return alert('Select a session and enter a new name.');
+            try {
+                const r = await fetch(`/session/${id}/name`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+                if (!r.ok) throw new Error(await r.text());
+                sessionsRenameInput.value = '';
+                await refreshSessionsModalList(sessionsSearch && sessionsSearch.value || '');
+            } catch (err) { alert(err.message || 'Unable to rename'); }
+        });
+    }
+    if (sessionsDeleteBtn) {
+        sessionsDeleteBtn.addEventListener('click', async () => {
+            const id = sessionsModalSelect && sessionsModalSelect.value;
+            if (!id) return;
+            if (!confirm('Delete this session permanently?')) return;
+            try {
+                const r = await fetch(`/session/${id}`, { method: 'DELETE' });
+                if (!r.ok && r.status !== 404) throw new Error(await r.text());
+                await refreshSessionsModalList(sessionsSearch && sessionsSearch.value || '');
+                await refreshSessionsList();
+                await refreshSwitcherList();
+            } catch (err) { alert(err.message || 'Unable to delete'); }
+        });
+    }
+    if (openQuestionDrawerBtn && questionDrawer) {
+        openQuestionDrawerBtn.addEventListener('click', () => {
+            buildQuestionRail();
+            questionDrawer.classList.remove('hidden');
+        });
+    }
+    if (closeQuestionDrawerBtn && questionDrawer) {
+        closeQuestionDrawerBtn.addEventListener('click', () => questionDrawer.classList.add('hidden'));
+    }
+    if (prevQuestionBtn) prevQuestionBtn.addEventListener('click', () => { if (state.currentQuestionIndex > 0) displayQuestion(state.currentQuestionIndex - 1); });
+    if (nextQuestionFooterBtn) nextQuestionFooterBtn.addEventListener('click', handleNextQuestion);
+    if (markReviewBtn) markReviewBtn.addEventListener('click', toggleMarkForReview);
+    if (openVoiceSettingsBtn && voiceSettingsDrawer) {
+        openVoiceSettingsBtn.addEventListener('click', async () => {
+            await populateVoiceSettingsDrawer();
+            voiceSettingsDrawer.classList.remove('hidden');
+        });
+    }
+    if (closeVoiceSettingsBtn && voiceSettingsDrawer) {
+        closeVoiceSettingsBtn.addEventListener('click', () => voiceSettingsDrawer.classList.add('hidden'));
+    }
+    // Drawer: preview and save
+    if (voicePreviewBtn2 && voiceSelect2 && voicePreviewAudio2) {
+        voicePreviewBtn2.addEventListener('click', async () => {
+            await populateVoiceSettingsDrawer();
+            const opt = voiceSelect2.options[voiceSelect2.selectedIndex];
+            let url = opt && opt.dataset.previewUrl;
+            if (!url && opt && opt.value) url = `/voices/preview/${encodeURIComponent(opt.value)}`;
+            if (!url) return alert('No preview available for this voice.');
+            try {
+                voicePreviewAudio2.src = url;
+                voicePreviewAudio2.classList.remove('hidden');
+                await voicePreviewAudio2.play().catch(() => {});
+            } catch (_) {}
+        });
+    }
+    if (voiceSaveBtn2 && voiceSelect2) {
+        voiceSaveBtn2.addEventListener('click', async () => {
+            if (!state.sessionId) return alert('Start or resume a session first.');
+            const voiceId = voiceSelect2.value;
+            try {
+                const r = await fetch(`/session/${state.sessionId}/voice`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ voice_id: voiceId }) });
+                if (!r.ok) throw new Error(await r.text());
+                if (voiceSelect) voiceSelect.value = voiceId;
+                // Offer to apply immediately by restarting the voice session
+                let applied = false;
+                if (state.voice && state.voice.peer) {
+                    applied = confirm('Voice saved. Restart the voice session now to apply the new voice?');
+                    if (applied) {
+                        try { stopVoiceInterview({ silent: true }); } catch (_) {}
+                        setTimeout(() => startVoiceInterview(), 150);
+                    }
+                }
+                if (!applied) alert('Voice saved. New prompts will use this voice.');
+            } catch (err) {
+                alert(err.message || 'Unable to save voice');
+            }
+        });
+    }
 });
 
 window.addEventListener('beforeunload', () => {
@@ -1541,9 +1786,7 @@ function setupEventListeners() {
 
 async function initVoiceSelector() {
     try {
-        const res = await fetch('/voices');
-        if (!res.ok) throw new Error('Failed to load voices');
-        const voices = await res.json();
+        const voices = await ensureVoicesCatalog();
         if (voiceSelect) {
             while (voiceSelect.firstChild) voiceSelect.removeChild(voiceSelect.firstChild);
             voices.forEach(v => {
@@ -1579,7 +1822,8 @@ async function initVoiceSelector() {
             voicePreviewBtn.addEventListener('click', async (e) => {
                 e.preventDefault();
                 const opt = voiceSelect.options[voiceSelect.selectedIndex];
-                const url = opt && opt.dataset.previewUrl;
+                let url = opt && opt.dataset.previewUrl;
+                if (!url && opt && opt.value) url = `/voices/preview/${encodeURIComponent(opt.value)}`; // fallback
                 if (!url) {
                     alert('No preview available for this voice.');
                     return;
@@ -1619,7 +1863,20 @@ async function initVoiceSelector() {
                         const detail = await r.text();
                         throw new Error(detail || 'Failed to save voice');
                     }
-                    alert('Voice saved. New prompts will use this voice.');
+                    // Mirror selection into the drawer select if present
+                    if (voiceSelect2) {
+                        voiceSelect2.value = voiceId;
+                    }
+                    // Offer to apply immediately by restarting the voice session
+                    let applied = false;
+                    if (state.voice && state.voice.peer) {
+                        applied = confirm('Voice saved. Restart the voice session now to apply the new voice?');
+                        if (applied) {
+                            try { stopVoiceInterview({ silent: true }); } catch (_) {}
+                            setTimeout(() => startVoiceInterview(), 150);
+                        }
+                    }
+                    if (!applied) alert('Voice saved. New prompts will use this voice.');
                 } catch (err) {
                     alert(err.message || 'Unable to save voice');
                 }
@@ -1627,6 +1884,44 @@ async function initVoiceSelector() {
         }
     } catch (err) {
         console.warn('Voice catalog unavailable:', err);
+    }
+}
+
+// Shared voices loader with cache + retry
+let __voicesCache = null;
+let __voicesPromise = null;
+async function ensureVoicesCatalog(force = false) {
+    if (!force && __voicesCache && Array.isArray(__voicesCache) && __voicesCache.length > 0) {
+        return __voicesCache;
+    }
+    if (!force && __voicesPromise) return __voicesPromise;
+    __voicesPromise = (async () => {
+        const res = await fetch('/voices');
+        if (!res.ok) throw new Error('Failed to load voices');
+        const list = await res.json();
+        __voicesCache = Array.isArray(list) ? list : [];
+        return __voicesCache;
+    })().finally(() => {
+        __voicesPromise = null;
+    });
+    return __voicesPromise;
+}
+
+async function loadSessionDocuments(sessionId) {
+    if (!sessionId) return;
+    try {
+        const res = await fetch(`/session/${sessionId}/documents`);
+        if (!res.ok) throw new Error('Failed to load documents');
+        const data = await res.json();
+        state.resumeText = (data && data.resume_text) || '';
+        state.jobDescText = (data && data.job_desc_text) || '';
+        if (docsPanel && !docsPanel.classList.contains('hidden')) {
+            if (resumeDocEl) resumeDocEl.textContent = state.resumeText || '';
+            if (jobDocEl) jobDocEl.textContent = state.jobDescText || '';
+        }
+    } catch (err) {
+        console.error('Docs load error:', err);
+        throw err;
     }
 }
 
@@ -1914,19 +2209,12 @@ function toggleDocsPanel() {
     if (willShow) {
         // Show panel immediately with loading indicators
         docsPanel.classList.remove('hidden');
-        if (resumeDocEl) resumeDocEl.textContent = 'Loading resume…';
-        if (jobDocEl) jobDocEl.textContent = 'Loading job description…';
-        fetch(`/session/${state.sessionId}/documents`)
-            .then(r => (r.ok ? r.json() : Promise.reject(new Error('Failed to load documents'))))
-            .then(data => {
-                if (resumeDocEl) resumeDocEl.textContent = data.resume_text || '';
-                if (jobDocEl) jobDocEl.textContent = data.job_desc_text || '';
-            })
-            .catch(err => {
-                console.error('Docs load error:', err);
-                if (resumeDocEl) resumeDocEl.textContent = 'Unable to load resume.';
-                if (jobDocEl) jobDocEl.textContent = 'Unable to load job description.';
-            });
+        if (resumeDocEl) resumeDocEl.textContent = state.resumeText || 'Loading resume…';
+        if (jobDocEl) jobDocEl.textContent = state.jobDescText || 'Loading job description…';
+        loadSessionDocuments(state.sessionId).catch(() => {
+            if (!state.resumeText && resumeDocEl) resumeDocEl.textContent = 'Unable to load resume.';
+            if (!state.jobDescText && jobDocEl) jobDocEl.textContent = 'Unable to load job description.';
+        });
     } else {
         docsPanel.classList.add('hidden');
     }
@@ -1970,6 +2258,11 @@ async function resumeSavedSession(sessionIdOverride = null) {
         state.questions = data.questions || [];
         state.answers = data.answers || [];
         state.evaluations = data.evaluations || [];
+        state.coachLevel = (data && data.coach_level) || state.coachLevel;
+        const savedVoiceId = data && data.voice_settings && data.voice_settings.voice_id;
+        if (savedVoiceId) state.voice.selectedVoiceId = savedVoiceId;
+        await loadSessionDocuments(state.sessionId).catch(() => {});
+        syncVoiceSettingsSummary();
         localStorage.setItem('interviewSessionId', state.sessionId);
 
         const persistedIndex = typeof data.current_question_index === 'number'
@@ -2126,6 +2419,7 @@ async function handleDocumentUpload(e) {
         state.sessionId = data.session_id;
         localStorage.setItem('interviewSessionId', state.sessionId);
         updateResumeControlsVisibility();
+        await loadSessionDocuments(state.sessionId).catch(() => {});
         
         // Generate questions
         await generateQuestions();
@@ -2217,6 +2511,7 @@ function displayQuestion(index) {
         exampleQuestion.classList.add('hidden');
     }
     refreshSwitcherList();
+    buildQuestionRail();
 }
 
 function updateQuestionPosition() {
@@ -2586,7 +2881,7 @@ function displaySummary() {
     }
     
     // Calculate average score
-    const totalScore = state.evaluations.reduce((sum, eval) => sum + (eval.score || 0), 0);
+    const totalScore = state.evaluations.reduce((sum, ev) => sum + (ev.score || 0), 0);
     const evaluationCount = state.evaluations.length;
     const avgScore = evaluationCount > 0 ? totalScore / evaluationCount : 0;
     
@@ -2607,15 +2902,15 @@ function displaySummary() {
     const strengths = new Set();
     const improvements = new Set();
     
-    state.evaluations.forEach(eval => {
-        if (eval.strengths) {
-            strengths.add(Array.isArray(eval.strengths) ? eval.strengths.join(', ') : eval.strengths);
+    state.evaluations.forEach(ev => {
+        if (ev.strengths) {
+            strengths.add(Array.isArray(ev.strengths) ? ev.strengths.join(', ') : ev.strengths);
         }
-        if (eval.weaknesses) {
-            improvements.add(Array.isArray(eval.weaknesses) ? eval.weaknesses.join(', ') : eval.weaknesses);
+        if (ev.weaknesses) {
+            improvements.add(Array.isArray(ev.weaknesses) ? ev.weaknesses.join(', ') : ev.weaknesses);
         }
-        if (eval.improvements && !eval.weaknesses) {
-            improvements.add(Array.isArray(eval.improvements) ? eval.improvements.join(', ') : eval.improvements);
+        if (ev.improvements && !ev.weaknesses) {
+            improvements.add(Array.isArray(ev.improvements) ? ev.improvements.join(', ') : ev.improvements);
         }
     });
     
@@ -2764,3 +3059,161 @@ function handleRestartInterview() {
     // Show upload section
     uploadSection.classList.remove('hidden');
 }
+
+// Additional UX helpers per wireframes
+function startNewInterviewFlow() {
+    try { stopVoiceInterview({ silent: true }); } catch (_) {}
+    state = createInitialState();
+    localStorage.removeItem('interviewSessionId');
+    if (interviewSection) interviewSection.classList.add('hidden');
+    if (summarySection) summarySection.classList.add('hidden');
+    if (uploadSection) uploadSection.classList.remove('hidden');
+    updateResumeControlsVisibility();
+}
+
+function toggleMuteVoice() {
+    if (!state || !state.voice || !state.voice.localStream) return;
+    const tracks = state.voice.localStream.getAudioTracks();
+    const currentlyEnabled = tracks.some(t => t.enabled);
+    tracks.forEach(t => (t.enabled = !currentlyEnabled));
+    if (muteVoiceBtn) muteVoiceBtn.textContent = currentlyEnabled ? 'Unmute' : 'Mute';
+}
+
+function buildQuestionRail() {
+    const host = questionRailList;
+    const hostDrawer = questionDrawerList;
+    if (!state || !Array.isArray(state.questions)) return;
+    const renderInto = (ul) => {
+        if (!ul) return;
+        ul.innerHTML = '';
+        state.questions.forEach((q, i) => {
+            const li = document.createElement('li');
+            const answered = Array.isArray(state.answers) && state.answers.some(a => a && a.question === q);
+            const hasTranscript = !!(state.voice && state.voice.transcriptsByIndex && state.voice.transcriptsByIndex[i]);
+            const flagged = !!(state.reviewFlags && state.reviewFlags[i]);
+            const classes = ['flex','items-center','justify-between','px-2','py-1','rounded-md','cursor-pointer'];
+            if (i === state.currentQuestionIndex) classes.push('bg-indigo-50','text-indigo-700');
+            li.className = classes.join(' ');
+            const span = document.createElement('span');
+            span.textContent = `${i+1}. ${q}`;
+            span.className = 'truncate';
+            const badge = document.createElement('span');
+            badge.textContent = flagged ? 'Review' : (answered ? 'Answered' : (hasTranscript ? 'In progress' : 'Not started'));
+            badge.className = 'ml-2 text-xs text-gray-500';
+            li.appendChild(span); li.appendChild(badge);
+            li.addEventListener('click', () => {
+                displayQuestion(i);
+                if (questionDrawer) questionDrawer.classList.add('hidden');
+            });
+            ul.appendChild(li);
+        });
+        const progressMini = document.getElementById('progress-mini');
+        if (progressMini) {
+            const answeredCount = state.answers.length || 0;
+            progressMini.textContent = `${answeredCount}/${state.questions.length}`;
+        }
+    };
+    renderInto(host);
+    renderInto(hostDrawer);
+}
+
+function toggleMarkForReview() {
+    const idx = state.currentQuestionIndex;
+    if (!Number.isInteger(idx)) return;
+    state.reviewFlags[idx] = !state.reviewFlags[idx];
+    buildQuestionRail();
+}
+
+async function refreshSessionsModalList(filter) {
+    try {
+        const res = await fetch('/sessions');
+        if (!res.ok) throw new Error('Failed to load sessions');
+        const items = await res.json();
+        if (sessionsModalSelect) {
+            sessionsModalSelect.innerHTML = '';
+            const term = String(filter || '').toLowerCase();
+            (items || []).filter(it => !term || String(it.name||'').toLowerCase().includes(term)).forEach(item => {
+                const opt = document.createElement('option');
+                opt.value = item.id; opt.textContent = item.name || `Session ${String(item.id).slice(0,8)}`;
+                sessionsModalSelect.appendChild(opt);
+            });
+        }
+    } catch (err) {
+        console.debug('Sessions modal list failed', err);
+        if (sessionsModalSelect) sessionsModalSelect.innerHTML = '';
+    }
+}
+
+function syncVoiceSettingsDrawer() {
+    if (!state || !state.voice) return;
+    if (toggleBrowserAsr2) toggleBrowserAsr2.checked = !!(state.voice.config && state.voice.config.useBrowserAsr);
+    if (toggleShowMetadata2) toggleShowMetadata2.checked = !!(state.voice.config && state.voice.config.showMetadata);
+    if (coachLevelSelect && coachLevelSelect2) coachLevelSelect2.value = coachLevelSelect.value;
+    // Voices population handled by populateVoiceSettingsDrawer()
+}
+
+async function populateVoiceSettingsDrawer() {
+    if (voiceSelect2Status) {
+        voiceSelect2Status.textContent = 'Loading voices…';
+        voiceSelect2Status.className = 'text-xs text-gray-500';
+    }
+    if (voiceSelect2Retry) voiceSelect2Retry.classList.add('hidden');
+    try {
+        const voices = await ensureVoicesCatalog();
+        if (voiceSelect2) {
+            voiceSelect2.innerHTML = '';
+            if (voices.length === 0) {
+                const opt = document.createElement('option');
+                opt.value = '';
+                opt.textContent = 'No voices available';
+                voiceSelect2.appendChild(opt);
+            } else {
+                voices.forEach(v => {
+                    const o = document.createElement('option');
+                    o.value = v.id;
+                    o.textContent = v.label || v.id;
+                    if (v.preview_url) o.dataset.previewUrl = v.preview_url;
+                    voiceSelect2.appendChild(o);
+                });
+                // default to main select selection if any
+                if (voiceSelect && voiceSelect.value) voiceSelect2.value = voiceSelect.value;
+            }
+        }
+        syncVoiceSettingsDrawer();
+        if (voiceSelect2Status) voiceSelect2Status.textContent = '';
+    } catch (err) {
+        if (voiceSelect2Status) {
+            voiceSelect2Status.textContent = 'Failed to load voices.';
+            voiceSelect2Status.className = 'text-xs text-rose-600';
+        }
+        if (voiceSelect2Retry) {
+            voiceSelect2Retry.classList.remove('hidden');
+            voiceSelect2Retry.onclick = async () => {
+                await populateVoiceSettingsDrawer();
+            };
+        }
+    }
+}
+
+// Keyboard shortcuts
+document.addEventListener('keydown', (e) => {
+    if (!state || !state.questions || state.questions.length === 0) return;
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+    const k = e.key.toLowerCase();
+    if (k === 'j' || e.key === 'ArrowRight') {
+        e.preventDefault();
+        handleNextQuestion();
+    } else if (k === 'k' || e.key === 'ArrowLeft') {
+        e.preventDefault();
+        if (state.currentQuestionIndex > 0) displayQuestion(state.currentQuestionIndex - 1);
+    } else if (k === 'v') {
+        e.preventDefault();
+        if (state.voice && state.voice.peer) { stopVoiceInterview(); } else { startVoiceInterview(); }
+    } else if (k === 'm') {
+        e.preventDefault(); toggleMuteVoice();
+    } else if (k === 'e') {
+        e.preventDefault(); exportFullTranscript();
+    } else if (k === 'g') {
+        e.preventDefault(); buildQuestionRail(); if (questionDrawer) questionDrawer.classList.remove('hidden');
+    }
+});

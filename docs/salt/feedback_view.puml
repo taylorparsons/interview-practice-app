@@ -1,0 +1,30 @@
+@startsalt
+{
+  {T} Feedback — Question 2 of 5
+  "Score" {
+    {T} Overall Score: 5 / 10  | [ Progress ▓▓░░░ ]
+  }
+  --
+  "Highlights" {
+    {T} Strengths
+    [ • Clear outcomes • Collaboration ]
+    {T} Areas for Improvement
+    [ • Add metrics • Clarify context ]
+  }
+  --
+  "Content Feedback" {
+    [ STAR breakdown, actionable suggestions, examples … ]
+  }
+  --
+  "Tone Feedback" {
+    [ Empathetic, concise, confident … ]
+  }
+  --
+  "Your Typed Answer" {
+    [ (readonly) Your submitted text … ]
+  }
+  --
+  [ ◀ Prev ] | [ Next Question ▶ ] | [ Mark for review ]
+}
+@endsalt
+

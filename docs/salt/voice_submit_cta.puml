@@ -1,0 +1,17 @@
+@startsalt
+{
+  {T} Voice Coach — Answer Ready
+  "Controls" {
+    [ Start Voice Session ] | {T} Ready • 132 words | [ Submit Voice Answer ] | [ Export Transcript ]
+  }
+  --
+  "Transcript (candidate)" {
+    {T} YOU — … auto‑assembled transcript for current question …
+  }
+  --
+  "Notes" {
+    {T} Hint: You can review or edit before submitting.
+  }
+}
+@endsalt
+

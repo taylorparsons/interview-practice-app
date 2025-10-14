@@ -272,10 +272,25 @@ async def upload_documents(
     if not allowed_file(resume.filename):
         raise HTTPException(status_code=400, detail="Invalid resume file format")
 
-    job_description_text = job_description_text or ""
+    # Normalize job description inputs
+    job_description_text = (job_description_text or "").strip()
+
+    # Some browsers submit an empty file field for job_description even when
+    # the user only pastes text. Treat an empty filename as no file.
+    if job_description is not None:
+        try:
+            filename = (job_description.filename or "").strip()
+        except Exception:
+            filename = ""
+        if not filename:
+            job_description = None
+
+    # Prefer pasted text when both a file and text are provided.
+    if job_description is not None and job_description_text:
+        job_description = None
 
     # Ensure either a file or text was provided for the job description
-    if job_description is None and not job_description_text.strip():
+    if job_description is None and not job_description_text:
         raise HTTPException(
             status_code=400,
             detail="Provide a job description file or paste the job description text.",
