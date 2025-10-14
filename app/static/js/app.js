@@ -40,6 +40,9 @@ function createInitialState() {
         answers: [],
         evaluations: [],
         reviewFlags: {},
+        coachLevel: appVoiceConfig.defaultCoachLevel || 'level_1',
+        resumeText: '',
+        jobDescText: '',
         room: null,
         participant: null,
         isRecording: false,
@@ -1904,6 +1907,24 @@ async function ensureVoicesCatalog(force = false) {
     return __voicesPromise;
 }
 
+async function loadSessionDocuments(sessionId) {
+    if (!sessionId) return;
+    try {
+        const res = await fetch(`/session/${sessionId}/documents`);
+        if (!res.ok) throw new Error('Failed to load documents');
+        const data = await res.json();
+        state.resumeText = (data && data.resume_text) || '';
+        state.jobDescText = (data && data.job_desc_text) || '';
+        if (docsPanel && !docsPanel.classList.contains('hidden')) {
+            if (resumeDocEl) resumeDocEl.textContent = state.resumeText || '';
+            if (jobDocEl) jobDocEl.textContent = state.jobDescText || '';
+        }
+    } catch (err) {
+        console.error('Docs load error:', err);
+        throw err;
+    }
+}
+
 async function initCoachLevelSelector() {
     if (!coachLevelSelect) return;
     try {
@@ -2188,19 +2209,12 @@ function toggleDocsPanel() {
     if (willShow) {
         // Show panel immediately with loading indicators
         docsPanel.classList.remove('hidden');
-        if (resumeDocEl) resumeDocEl.textContent = 'Loading resume…';
-        if (jobDocEl) jobDocEl.textContent = 'Loading job description…';
-        fetch(`/session/${state.sessionId}/documents`)
-            .then(r => (r.ok ? r.json() : Promise.reject(new Error('Failed to load documents'))))
-            .then(data => {
-                if (resumeDocEl) resumeDocEl.textContent = data.resume_text || '';
-                if (jobDocEl) jobDocEl.textContent = data.job_desc_text || '';
-            })
-            .catch(err => {
-                console.error('Docs load error:', err);
-                if (resumeDocEl) resumeDocEl.textContent = 'Unable to load resume.';
-                if (jobDocEl) jobDocEl.textContent = 'Unable to load job description.';
-            });
+        if (resumeDocEl) resumeDocEl.textContent = state.resumeText || 'Loading resume…';
+        if (jobDocEl) jobDocEl.textContent = state.jobDescText || 'Loading job description…';
+        loadSessionDocuments(state.sessionId).catch(() => {
+            if (!state.resumeText && resumeDocEl) resumeDocEl.textContent = 'Unable to load resume.';
+            if (!state.jobDescText && jobDocEl) jobDocEl.textContent = 'Unable to load job description.';
+        });
     } else {
         docsPanel.classList.add('hidden');
     }
@@ -2244,6 +2258,11 @@ async function resumeSavedSession(sessionIdOverride = null) {
         state.questions = data.questions || [];
         state.answers = data.answers || [];
         state.evaluations = data.evaluations || [];
+        state.coachLevel = (data && data.coach_level) || state.coachLevel;
+        const savedVoiceId = data && data.voice_settings && data.voice_settings.voice_id;
+        if (savedVoiceId) state.voice.selectedVoiceId = savedVoiceId;
+        await loadSessionDocuments(state.sessionId).catch(() => {});
+        syncVoiceSettingsSummary();
         localStorage.setItem('interviewSessionId', state.sessionId);
 
         const persistedIndex = typeof data.current_question_index === 'number'
@@ -2400,6 +2419,7 @@ async function handleDocumentUpload(e) {
         state.sessionId = data.session_id;
         localStorage.setItem('interviewSessionId', state.sessionId);
         updateResumeControlsVisibility();
+        await loadSessionDocuments(state.sessionId).catch(() => {});
         
         // Generate questions
         await generateQuestions();
