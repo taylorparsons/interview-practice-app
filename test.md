@@ -17,6 +17,7 @@
    - Voice session: validates realtime session payload fields (model, voice, input transcription, VAD none), fully stubbed httpx client.
    - Voice preview: exercises cached MP3 serving and synth-on-miss, 404 for unknown ids, 503 without key, and catalog cache invalidation.
    - UI toggles: ensures browser ASR fallback is OFF by default, gating is present, and dedup logic exists for finalized user messages.
+   - Upload + UI regressions: verifies the upload form posts multipart to `/upload-documents`, pasted JD text is accepted when no file is provided, text wins when both text and a file are present, and the JS bundle does not rely on removed globals or the `eval` identifier.
 
 Or simply run:
 ```bash
@@ -49,6 +50,10 @@ This script prints the command being used and mirrors the detailed pytest output
      ```bash
      pytest -q -k export_transcript
      ```
+   - Upload + UI regression tests:
+     ```bash
+     pytest -q -k upload_and_ui_regressions
+     ```
 
 4. **Review output**
    - `..` indicates passing tests; any failure will show stack traces for investigation.
@@ -65,6 +70,11 @@ This script prints the command being used and mirrors the detailed pytest output
 - `tests/test_ui_fallback_and_dedup.py`: asserts default OFF browser fallback, gated start on data channel open, suppression of ASR while coach speaks, and duplicate “You” de‑duplication logic presence.
 - `tests/test_ui_voice_layout.py`: template/JS wiring for live layout toggles (hiding manual inputs, expanding transcript viewport).
 - `tests/test_export_transcript.py`: export logic that backfills “You” from per‑question transcripts, orders lines predictably, and coalesces adjacent “You” lines.
+- `tests/test_upload_and_ui_regressions.py`: end‑to‑end upload behaviors + safety checks.
+  - Accepts pasted job description text when the file input is empty.
+  - Prefers pasted JD text when both file and text are provided.
+  - Ensures the upload form uses `POST /upload-documents` with `multipart/form-data` (prevents long GET URLs with querystrings).
+  - Guards against accidental reliance on removed JS globals and avoids `eval` as a variable name in strict mode.
 
 ## Observability Follow-Up
 - Subscribe your log pipeline to `voice.transcript.metric` to monitor completeness ratios.
@@ -76,3 +86,4 @@ This script prints the command being used and mirrors the detailed pytest output
 - No OpenAI key is required for tests; network calls are stubbed in `tests/test_voice_session.py`.
 - Voice preview tests do not make real network calls; TTS synthesis is stubbed and the generated MP3 is written under `app/static/voices/`. Ensure this directory is writable in your environment.
 - If a preview test fails due to an unexpected cache hit, remove `app/static/voices/*-preview.mp3` files and re-run.
+- If an upload test fails with 422, ensure the form posts `multipart/form-data` and that the JD file field is truly empty when testing the pasted‑text path.

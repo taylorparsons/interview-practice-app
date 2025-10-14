@@ -2881,7 +2881,7 @@ function displaySummary() {
     }
     
     // Calculate average score
-    const totalScore = state.evaluations.reduce((sum, eval) => sum + (eval.score || 0), 0);
+    const totalScore = state.evaluations.reduce((sum, ev) => sum + (ev.score || 0), 0);
     const evaluationCount = state.evaluations.length;
     const avgScore = evaluationCount > 0 ? totalScore / evaluationCount : 0;
     
@@ -2902,15 +2902,15 @@ function displaySummary() {
     const strengths = new Set();
     const improvements = new Set();
     
-    state.evaluations.forEach(eval => {
-        if (eval.strengths) {
-            strengths.add(Array.isArray(eval.strengths) ? eval.strengths.join(', ') : eval.strengths);
+    state.evaluations.forEach(ev => {
+        if (ev.strengths) {
+            strengths.add(Array.isArray(ev.strengths) ? ev.strengths.join(', ') : ev.strengths);
         }
-        if (eval.weaknesses) {
-            improvements.add(Array.isArray(eval.weaknesses) ? eval.weaknesses.join(', ') : eval.weaknesses);
+        if (ev.weaknesses) {
+            improvements.add(Array.isArray(ev.weaknesses) ? ev.weaknesses.join(', ') : ev.weaknesses);
         }
-        if (eval.improvements && !eval.weaknesses) {
-            improvements.add(Array.isArray(eval.improvements) ? eval.improvements.join(', ') : eval.improvements);
+        if (ev.improvements && !ev.weaknesses) {
+            improvements.add(Array.isArray(ev.improvements) ? ev.improvements.join(', ') : ev.improvements);
         }
     });
     
