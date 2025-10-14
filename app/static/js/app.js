@@ -2,6 +2,7 @@
 
 // State management
 function createInitialVoiceState() {
+    const voiceConfig = (typeof window !== 'undefined' && window.APP_CONFIG && window.APP_CONFIG.voice) || {};
     return {
         peer: null,
         dataChannel: null,
@@ -24,9 +25,8 @@ function createInitialVoiceState() {
         // start a new bubble or continue the previous one.
         lastFinalSpeaker: '',
         config: {
-            // Default OFF: rely on server-side transcription unless explicitly enabled
-            useBrowserAsr: false,
-            showMetadata: false,
+            useBrowserAsr: !!voiceConfig.useBrowserAsr,
+            showMetadata: !!voiceConfig.showMetadata,
         },
     };
 }
@@ -121,8 +121,6 @@ const voiceActivityDot = voiceActivityIndicator
 const voiceActivityLabel = voiceActivityIndicator
     ? voiceActivityIndicator.querySelector('[data-indicator-label]')
     : null;
-const toggleBrowserAsr = document.getElementById('toggle-browser-asr');
-const toggleShowMetadata = document.getElementById('toggle-show-metadata');
 const exportTranscriptBtn = document.getElementById('export-transcript');
 const voiceSelect = document.getElementById('voice-select');
 const voicePreviewBtn = document.getElementById('voice-preview');
@@ -158,8 +156,6 @@ const sessionsCloseBtn = document.getElementById('close-sessions');
 const openVoiceSettingsBtn = document.getElementById('open-voice-settings');
 const voiceSettingsDrawer = document.getElementById('voice-settings-drawer');
 const closeVoiceSettingsBtn = document.getElementById('close-voice-settings');
-const toggleBrowserAsr2 = document.getElementById('toggle-browser-asr-2');
-const toggleShowMetadata2 = document.getElementById('toggle-show-metadata-2');
 const coachLevelSelect2 = document.getElementById('coach-level-select-2');
 const coachLevelSaveBtn2 = document.getElementById('coach-level-save-2');
 const voiceSelect2 = document.getElementById('voice-select-2');
@@ -168,6 +164,8 @@ const voiceSaveBtn2 = document.getElementById('voice-save-2');
 const voicePreviewAudio2 = document.getElementById('voice-preview-audio-2');
 const voiceSelect2Status = document.getElementById('voice-select-2-status');
 const voiceSelect2Retry = document.getElementById('voice-select-2-retry');
+const voiceFallbackStateEl = document.getElementById('voice-config-fallback-state');
+const voiceMetadataStateEl = document.getElementById('voice-config-metadata-state');
 
 const voiceStatusClasses = {
     idle: 'text-gray-500',
@@ -1542,28 +1540,8 @@ document.addEventListener('DOMContentLoaded', () => {
     initVoiceSelector();
     // Initialize coach level select/save (loads current level on active session)
     (async () => { try { await initCoachLevelSelector(); } catch (_) {} })();
-    // Initialize voice settings toggles
-    if (toggleBrowserAsr) {
-        toggleBrowserAsr.checked = !!(state.voice && state.voice.config && state.voice.config.useBrowserAsr);
-        toggleBrowserAsr.addEventListener('change', () => {
-            if (state.voice && state.voice.config) {
-                state.voice.config.useBrowserAsr = !!toggleBrowserAsr.checked;
-                if (!toggleBrowserAsr.checked) {
-                    stopBrowserAsr();
-                } else if (state.voice.peer && state.voice.dataChannel) {
-                    startBrowserAsrIfAvailable();
-                }
-            }
-        });
-    }
-    if (toggleShowMetadata) {
-        toggleShowMetadata.checked = !!(state.voice && state.voice.config && state.voice.config.showMetadata);
-        toggleShowMetadata.addEventListener('change', () => {
-            if (state.voice && state.voice.config) {
-                state.voice.config.showMetadata = !!toggleShowMetadata.checked;
-            }
-        });
-    }
+    // Voice configuration is controlled via server config; update summary text
+    syncVoiceSettingsSummary();
     if (exportTranscriptBtn) {
         exportTranscriptBtn.addEventListener('click', exportFullTranscript);
     }
@@ -3124,10 +3102,16 @@ async function refreshSessionsModalList(filter) {
     }
 }
 
-function syncVoiceSettingsDrawer() {
+function syncVoiceSettingsSummary() {
     if (!state || !state.voice) return;
-    if (toggleBrowserAsr2) toggleBrowserAsr2.checked = !!(state.voice.config && state.voice.config.useBrowserAsr);
-    if (toggleShowMetadata2) toggleShowMetadata2.checked = !!(state.voice.config && state.voice.config.showMetadata);
+    const fallbackEnabled = !!(state.voice.config && state.voice.config.useBrowserAsr);
+    const metadataEnabled = !!(state.voice.config && state.voice.config.showMetadata);
+    if (voiceFallbackStateEl) voiceFallbackStateEl.textContent = fallbackEnabled ? 'Enabled' : 'Disabled';
+    if (voiceMetadataStateEl) voiceMetadataStateEl.textContent = metadataEnabled ? 'Shown' : 'Hidden';
+}
+
+function syncVoiceSettingsDrawer() {
+    syncVoiceSettingsSummary();
     if (coachLevelSelect && coachLevelSelect2) coachLevelSelect2.value = coachLevelSelect.value;
     // Voices population handled by populateVoiceSettingsDrawer()
 }

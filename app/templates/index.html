@@ -166,16 +166,7 @@
                             <span data-indicator-dot class="inline-flex h-2.5 w-2.5 rounded-full bg-gray-300 transition"></span>
                             <span data-indicator-label>Mic idle</span>
                         </div>
-                        <!-- Pre-call voice settings row (visible before start; hidden while live) -->
-                        <div id="voice-settings-pre" class="mt-2 flex flex-wrap items-center gap-4 text-xs text-gray-600 hidden">
-                            <label class="inline-flex items-center gap-2">
-                                <input id="toggle-browser-asr" type="checkbox" class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
-                                <span>Browser transcription fallback</span>
-                            </label>
-                            <label class="inline-flex items-center gap-2">
-                                <input id="toggle-show-metadata" type="checkbox" class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
-                                <span>Show transcript metadata</span>
-                            </label>
+                        <div id="voice-settings-pre" class="mt-2 flex flex-wrap items-center gap-4 text-xs text-gray-600">
                             <div class="inline-flex items-center gap-2">
                                 <label for="coach-level-select" class="text-gray-600">Coaching Level</label>
                                 <select id="coach-level-select" class="border border-gray-300 rounded-md text-xs py-1 px-2">
@@ -193,6 +184,9 @@
                                 <button id="voice-save" class="py-1 px-2 border border-indigo-300 rounded-md bg-indigo-50 text-indigo-700 hover:bg-indigo-100">Save</button>
                                 <audio id="voice-preview-audio" class="hidden"></audio>
                             </div>
+                        </div>
+                        <div class="mt-2 text-xs text-gray-500" id="voice-config-summary">
+                            Browser transcription fallback: <span id="voice-config-fallback-state">{{ 'Enabled' if voice_browser_fallback_default else 'Disabled' }}</span> · Transcript metadata: <span id="voice-config-metadata-state">{{ 'Shown' if voice_show_metadata_default else 'Hidden' }}</span>
                         </div>
                         <audio id="voice-audio" autoplay playsinline class="hidden"></audio>
                         <div id="voice-transcript" class="mt-4 space-y-2 max-h-64 overflow-y-auto text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-md p-3"></div>
@@ -348,14 +342,6 @@
                 <button id="close-voice-settings" class="py-1 px-2 border border-gray-300 rounded-md text-sm">Close</button>
             </div>
             <div class="flex flex-col gap-3 text-sm text-gray-700">
-                <label class="inline-flex items-center gap-2">
-                    <input id="toggle-browser-asr-2" type="checkbox" class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
-                    <span>Browser transcription fallback</span>
-                </label>
-                <label class="inline-flex items-center gap-2">
-                    <input id="toggle-show-metadata-2" type="checkbox" class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
-                    <span>Show transcript metadata</span>
-                </label>
                 <div class="inline-flex items-center gap-2">
                     <label for="coach-level-select-2" class="text-gray-600">Coaching Level</label>
                     <select id="coach-level-select-2" class="border border-gray-300 rounded-md text-xs py-1 px-2">
@@ -364,7 +350,8 @@
                     </select>
                     <button id="coach-level-save-2" class="py-1 px-2 border border-indigo-300 rounded-md bg-indigo-50 text-indigo-700 hover:bg-indigo-100">Save</button>
                 </div>
-                <div class="inline-flex items-center gap-2">
+                <p class="text-xs text-gray-500">Browser transcription fallback is configured in the server settings and is currently <strong>{{ 'enabled' if voice_browser_fallback_default else 'disabled' }}</strong>. Transcript metadata is <strong>{{ 'shown' if voice_show_metadata_default else 'hidden' }}</strong>.</p>
+                <div class="inline-flex items-center gap-2 mt-4">
                     <label for="voice-select-2" class="text-gray-600">Voice</label>
                     <select id="voice-select-2" class="border border-gray-300 rounded-md text-xs py-1 px-2">
                         <option value="">Loading…</option>
@@ -373,7 +360,7 @@
                     <button id="voice-save-2" class="py-1 px-2 border border-indigo-300 rounded-md bg-indigo-50 text-indigo-700 hover:bg-indigo-100">Save</button>
                     <audio id="voice-preview-audio-2" class="hidden"></audio>
                 </div>
-                <div id="voice-select-2-status" class="text-xs text-gray-500"></div>
+                <div id="voice-select-2-status" class="text-xs text-gray-500 mt-1"></div>
                 <div>
                     <button id="voice-select-2-retry" class="hidden mt-1 py-1 px-2 border border-gray-300 rounded-md text-xs">Retry loading voices</button>
                 </div>
@@ -408,6 +395,13 @@
 
     <script src="https://cdn.jsdelivr.net/npm/livekit-client/dist/livekit-client.umd.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/showdown@2.1.0/dist/showdown.min.js"></script>
+    <script>
+        window.APP_CONFIG = window.APP_CONFIG || {};
+        window.APP_CONFIG.voice = {
+            useBrowserAsr: {{ 'true' if voice_browser_fallback_default else 'false' }},
+            showMetadata: {{ 'true' if voice_show_metadata_default else 'false' }}
+        };
+    </script>
     <script src="/static/js/app.js"></script>
 </body>
 </html>

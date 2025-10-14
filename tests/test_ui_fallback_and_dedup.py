@@ -13,18 +13,16 @@ def _read_text(path: Path) -> str:
 
 def test_fallback_default_off_in_js():
     js = _read_text(JS_PATH)
-    # Ensure the initial voice state disables browser ASR by default
-    assert "useBrowserAsr: false" in js
+    # Ensure the initial voice state respects APP_CONFIG defaults (false when unspecified)
+    assert "window.APP_CONFIG" in js
+    assert "voiceConfig = (typeof window" in js
+    assert "useBrowserAsr: !!voiceConfig.useBrowserAsr" in js
 
 
-def test_browser_fallback_checkbox_not_prechecked():
+def test_browser_fallback_checkbox_removed_from_ui():
     html = _read_text(HTML_PATH)
-    # The toggle should not include the 'checked' attribute by default
-    line = next(
-        (l for l in html.splitlines() if 'id="toggle-browser-asr"' in l and '<input' in l),
-        "",
-    )
-    assert "checked" not in line
+    # Toggle is controlled via config, not UI; ensure checkbox is absent
+    assert 'toggle-browser-asr' not in html
 
 
 def test_onopen_does_not_autostart_browser_asr():

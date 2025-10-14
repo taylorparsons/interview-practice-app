@@ -27,6 +27,17 @@ def _parse_extensions(value: str | None, default: Set[str]) -> Set[str]:
     return items or default
 
 
+def _parse_bool(value: str | None, default: bool) -> bool:
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip()
 
@@ -45,6 +56,8 @@ OPENAI_INPUT_TRANSCRIPTION_MODEL = os.getenv("OPENAI_INPUT_TRANSCRIPTION_MODEL",
 
 UPLOAD_FOLDER = _resolve_upload_dir(os.getenv("UPLOAD_FOLDER"))
 ALLOWED_EXTENSIONS = _parse_extensions(os.getenv("ALLOWED_EXTENSIONS"), {"pdf", "docx", "txt"})
+VOICE_BROWSER_FALLBACK_DEFAULT = _parse_bool(os.getenv("VOICE_BROWSER_FALLBACK_DEFAULT"), False)
+VOICE_SHOW_METADATA_DEFAULT = _parse_bool(os.getenv("VOICE_SHOW_METADATA_DEFAULT"), False)
 
 __all__ = [
     "BASE_DIR",
@@ -60,4 +73,6 @@ __all__ = [
     "OPENAI_INPUT_TRANSCRIPTION_MODEL",
     "UPLOAD_FOLDER",
     "ALLOWED_EXTENSIONS",
+    "VOICE_BROWSER_FALLBACK_DEFAULT",
+    "VOICE_SHOW_METADATA_DEFAULT",
 ]
