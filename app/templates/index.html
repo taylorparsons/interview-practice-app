@@ -56,7 +56,7 @@
                     </div>
                 </div>
                 <h2 class="text-xl font-semibold mb-4">Upload Documents</h2>
-                <form id="upload-form" class="space-y-4">
+                <form id="upload-form" class="space-y-4" method="post" action="/upload-documents" enctype="multipart/form-data">
                     <div>
                         <label for="resume" class="block text-sm font-medium text-gray-700">Your Resume</label>
                         <input type="file" id="resume" name="resume" accept=".pdf,.docx,.txt" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
