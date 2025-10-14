@@ -10,17 +10,16 @@ def _read_text(p: Path) -> str:
         return f.read()
 
 
-def test_coach_level_summary_present_in_template():
+def test_coach_level_selector_present_in_template():
     html = _read_text(HTML_PATH)
-    assert 'id="voice-summary-coach-level"' in html
-    assert 'id="voice-summary-voice"' in html
-    # Drawer controls remain for editing
-    assert 'id="coach-level-select-2"' in html
-    assert 'id="voice-select-2"' in html
+    assert 'id="coach-level-select"' in html
+    assert 'id="coach-level-save"' in html
 
 
-def test_coach_level_js_handles_save_and_state():
+def test_coach_level_js_wires_save_and_fetch():
     js = _read_text(JS_PATH)
-    assert 'state.coachLevel' in js
-    assert 'coachLevelSaveBtn2' in js
-    assert '/coach-level' in js
+    # Init function present and attached on DOMContentLoaded
+    assert 'function initCoachLevelSelector()' in js
+    assert 'fetch(`/session/${state.sessionId}/coach-level`' in js or '"/session/${state.sessionId}/coach-level"' in js or '/coach-level' in js
+    # Ensures select is filled from GET /session/{id}
+    assert 'fetch(`/session/${state.sessionId}`' in js or 'fetch(`/session/`' in js

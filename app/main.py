@@ -265,8 +265,6 @@ async def get_index(request: Request):
             "request": request,
             "voice_browser_fallback_default": VOICE_BROWSER_FALLBACK_DEFAULT,
             "voice_show_metadata_default": VOICE_SHOW_METADATA_DEFAULT,
-            "openai_realtime_voice": OPENAI_REALTIME_VOICE,
-            "coach_level_default": "level_1",
         },
     )
 
