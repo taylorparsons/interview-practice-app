@@ -39,6 +39,7 @@ function createInitialState() {
         currentQuestionIndex: 0,
         answers: [],
         evaluations: [],
+        reviewFlags: {},
         room: null,
         participant: null,
         isRecording: false,
@@ -64,6 +65,10 @@ const viewDocsBtn = document.getElementById('view-docs');
 const resumeDocEl = document.getElementById('resume-doc');
 const jobDocEl = document.getElementById('jobdoc-doc');
 const resumeActions = document.getElementById('resume-actions');
+// App bar controls
+const newInterviewBtn = document.getElementById('global-new-interview');
+const openSessionsBtn = document.getElementById('global-sessions');
+const openSettingsBtn = document.getElementById('global-settings');
 // Manual answer UI controls (hidden during live voice)
 const answerLabel = document.querySelector('label[for="answer"]');
 const resumeSessionBtn = document.getElementById('resume-session');
@@ -128,6 +133,39 @@ const coachLevelSelect = document.getElementById('coach-level-select');
 const coachLevelSaveBtn = document.getElementById('coach-level-save');
 // Voice submission button (parity with typed Submit)
 const submitVoiceBtn = document.getElementById('submit-voice-answer');
+const muteVoiceBtn = document.getElementById('mute-voice');
+// Question rail & drawer
+const questionRailList = document.getElementById('question-rail-list');
+const questionDrawer = document.getElementById('question-drawer');
+const questionDrawerList = document.getElementById('question-drawer-list');
+const openQuestionDrawerBtn = document.getElementById('open-question-drawer');
+const closeQuestionDrawerBtn = document.getElementById('close-question-drawer');
+// Footer controls
+const prevQuestionBtn = document.getElementById('prev-question');
+const markReviewBtn = document.getElementById('mark-review');
+const nextQuestionFooterBtn = document.getElementById('next-question-footer');
+// Sessions modal
+const sessionsModal = document.getElementById('sessions-modal');
+const sessionsSearch = document.getElementById('sessions-search');
+const sessionsRefresh = document.getElementById('sessions-refresh');
+const sessionsModalSelect = document.getElementById('sessions-modal-select');
+const sessionsLoadBtn = document.getElementById('sessions-load');
+const sessionsRenameBtn = document.getElementById('sessions-rename');
+const sessionsDeleteBtn = document.getElementById('sessions-delete');
+const sessionsRenameInput = document.getElementById('sessions-rename-input');
+const sessionsCloseBtn = document.getElementById('close-sessions');
+// Voice settings drawer
+const openVoiceSettingsBtn = document.getElementById('open-voice-settings');
+const voiceSettingsDrawer = document.getElementById('voice-settings-drawer');
+const closeVoiceSettingsBtn = document.getElementById('close-voice-settings');
+const toggleBrowserAsr2 = document.getElementById('toggle-browser-asr-2');
+const toggleShowMetadata2 = document.getElementById('toggle-show-metadata-2');
+const coachLevelSelect2 = document.getElementById('coach-level-select-2');
+const coachLevelSaveBtn2 = document.getElementById('coach-level-save-2');
+const voiceSelect2 = document.getElementById('voice-select-2');
+const voicePreviewBtn2 = document.getElementById('voice-preview-2');
+const voiceSaveBtn2 = document.getElementById('voice-save-2');
+const voicePreviewAudio2 = document.getElementById('voice-preview-audio-2');
 
 const voiceStatusClasses = {
     idle: 'text-gray-500',
@@ -172,6 +210,10 @@ function setVoiceLayout(isLive) {
         voiceTranscript.classList.toggle('max-h-64', !isLive);
         voiceTranscript.classList.toggle('max-h-96', isLive);
     }
+    // Toggle visibility of pre-call settings and inline mute
+    const voicePre = document.getElementById('voice-settings-pre');
+    if (voicePre) voicePre.classList.toggle('hidden', isLive);
+    if (muteVoiceBtn) muteVoiceBtn.classList.toggle('hidden', !isLive);
     // Re-evaluate whether the voice transcript is ready to submit
     try { updateVoiceSubmitAvailability(); } catch (_) {}
 }
@@ -1527,6 +1569,80 @@ document.addEventListener('DOMContentLoaded', () => {
         submitVoiceBtn.addEventListener('click', handleVoiceAnswerSubmission);
         try { updateVoiceSubmitAvailability(); } catch (_) {}
     }
+    if (muteVoiceBtn) {
+        muteVoiceBtn.addEventListener('click', toggleMuteVoice);
+    }
+    if (newInterviewBtn) {
+        newInterviewBtn.addEventListener('click', startNewInterviewFlow);
+    }
+    if (openSessionsBtn && sessionsModal) {
+        openSessionsBtn.addEventListener('click', async () => {
+            await refreshSessionsModalList('');
+            sessionsModal.classList.remove('hidden');
+        });
+    }
+    if (sessionsCloseBtn && sessionsModal) {
+        sessionsCloseBtn.addEventListener('click', () => sessionsModal.classList.add('hidden'));
+    }
+    if (sessionsRefresh) {
+        sessionsRefresh.addEventListener('click', async () => refreshSessionsModalList(sessionsSearch && sessionsSearch.value || ''));
+    }
+    if (sessionsSearch) {
+        sessionsSearch.addEventListener('input', async () => refreshSessionsModalList(sessionsSearch.value || ''));
+    }
+    if (sessionsLoadBtn) {
+        sessionsLoadBtn.addEventListener('click', async () => {
+            const id = sessionsModalSelect && sessionsModalSelect.value;
+            if (!id) return;
+            sessionsModal.classList.add('hidden');
+            await resumeSavedSessionById(id);
+        });
+    }
+    if (sessionsRenameBtn) {
+        sessionsRenameBtn.addEventListener('click', async () => {
+            const id = sessionsModalSelect && sessionsModalSelect.value;
+            const name = sessionsRenameInput && sessionsRenameInput.value.trim();
+            if (!id || !name) return alert('Select a session and enter a new name.');
+            try {
+                const r = await fetch(`/session/${id}/name`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+                if (!r.ok) throw new Error(await r.text());
+                sessionsRenameInput.value = '';
+                await refreshSessionsModalList(sessionsSearch && sessionsSearch.value || '');
+            } catch (err) { alert(err.message || 'Unable to rename'); }
+        });
+    }
+    if (sessionsDeleteBtn) {
+        sessionsDeleteBtn.addEventListener('click', async () => {
+            const id = sessionsModalSelect && sessionsModalSelect.value;
+            if (!id) return;
+            if (!confirm('Delete this session permanently?')) return;
+            try {
+                const r = await fetch(`/session/${id}`, { method: 'DELETE' });
+                if (!r.ok && r.status !== 404) throw new Error(await r.text());
+                await refreshSessionsModalList(sessionsSearch && sessionsSearch.value || '');
+                await refreshSessionsList();
+                await refreshSwitcherList();
+            } catch (err) { alert(err.message || 'Unable to delete'); }
+        });
+    }
+    if (openQuestionDrawerBtn && questionDrawer) {
+        openQuestionDrawerBtn.addEventListener('click', () => {
+            buildQuestionRail();
+            questionDrawer.classList.remove('hidden');
+        });
+    }
+    if (closeQuestionDrawerBtn && questionDrawer) {
+        closeQuestionDrawerBtn.addEventListener('click', () => questionDrawer.classList.add('hidden'));
+    }
+    if (prevQuestionBtn) prevQuestionBtn.addEventListener('click', () => { if (state.currentQuestionIndex > 0) displayQuestion(state.currentQuestionIndex - 1); });
+    if (nextQuestionFooterBtn) nextQuestionFooterBtn.addEventListener('click', handleNextQuestion);
+    if (markReviewBtn) markReviewBtn.addEventListener('click', toggleMarkForReview);
+    if (openVoiceSettingsBtn && voiceSettingsDrawer) {
+        openVoiceSettingsBtn.addEventListener('click', () => { syncVoiceSettingsDrawer(); voiceSettingsDrawer.classList.remove('hidden'); });
+    }
+    if (closeVoiceSettingsBtn && voiceSettingsDrawer) {
+        closeVoiceSettingsBtn.addEventListener('click', () => voiceSettingsDrawer.classList.add('hidden'));
+    }
 });
 
 window.addEventListener('beforeunload', () => {
@@ -2294,6 +2410,7 @@ function displayQuestion(index) {
         exampleQuestion.classList.add('hidden');
     }
     refreshSwitcherList();
+    buildQuestionRail();
 }
 
 function updateQuestionPosition() {
@@ -2841,3 +2958,127 @@ function handleRestartInterview() {
     // Show upload section
     uploadSection.classList.remove('hidden');
 }
+
+// Additional UX helpers per wireframes
+function startNewInterviewFlow() {
+    try { stopVoiceInterview({ silent: true }); } catch (_) {}
+    state = createInitialState();
+    localStorage.removeItem('interviewSessionId');
+    if (interviewSection) interviewSection.classList.add('hidden');
+    if (summarySection) summarySection.classList.add('hidden');
+    if (uploadSection) uploadSection.classList.remove('hidden');
+    updateResumeControlsVisibility();
+}
+
+function toggleMuteVoice() {
+    if (!state || !state.voice || !state.voice.localStream) return;
+    const tracks = state.voice.localStream.getAudioTracks();
+    const currentlyEnabled = tracks.some(t => t.enabled);
+    tracks.forEach(t => (t.enabled = !currentlyEnabled));
+    if (muteVoiceBtn) muteVoiceBtn.textContent = currentlyEnabled ? 'Unmute' : 'Mute';
+}
+
+function buildQuestionRail() {
+    const host = questionRailList;
+    const hostDrawer = questionDrawerList;
+    if (!state || !Array.isArray(state.questions)) return;
+    const renderInto = (ul) => {
+        if (!ul) return;
+        ul.innerHTML = '';
+        state.questions.forEach((q, i) => {
+            const li = document.createElement('li');
+            const answered = Array.isArray(state.answers) && state.answers.some(a => a && a.question === q);
+            const hasTranscript = !!(state.voice && state.voice.transcriptsByIndex && state.voice.transcriptsByIndex[i]);
+            const flagged = !!(state.reviewFlags && state.reviewFlags[i]);
+            const classes = ['flex','items-center','justify-between','px-2','py-1','rounded-md','cursor-pointer'];
+            if (i === state.currentQuestionIndex) classes.push('bg-indigo-50','text-indigo-700');
+            li.className = classes.join(' ');
+            const span = document.createElement('span');
+            span.textContent = `${i+1}. ${q}`;
+            span.className = 'truncate';
+            const badge = document.createElement('span');
+            badge.textContent = flagged ? 'Review' : (answered ? 'Answered' : (hasTranscript ? 'In progress' : 'Not started'));
+            badge.className = 'ml-2 text-xs text-gray-500';
+            li.appendChild(span); li.appendChild(badge);
+            li.addEventListener('click', () => {
+                displayQuestion(i);
+                if (questionDrawer) questionDrawer.classList.add('hidden');
+            });
+            ul.appendChild(li);
+        });
+        const progressMini = document.getElementById('progress-mini');
+        if (progressMini) {
+            const answeredCount = state.answers.length || 0;
+            progressMini.textContent = `${answeredCount}/${state.questions.length}`;
+        }
+    };
+    renderInto(host);
+    renderInto(hostDrawer);
+}
+
+function toggleMarkForReview() {
+    const idx = state.currentQuestionIndex;
+    if (!Number.isInteger(idx)) return;
+    state.reviewFlags[idx] = !state.reviewFlags[idx];
+    buildQuestionRail();
+}
+
+async function refreshSessionsModalList(filter) {
+    try {
+        const res = await fetch('/sessions');
+        if (!res.ok) throw new Error('Failed to load sessions');
+        const items = await res.json();
+        if (sessionsModalSelect) {
+            sessionsModalSelect.innerHTML = '';
+            const term = String(filter || '').toLowerCase();
+            (items || []).filter(it => !term || String(it.name||'').toLowerCase().includes(term)).forEach(item => {
+                const opt = document.createElement('option');
+                opt.value = item.id; opt.textContent = item.name || `Session ${String(item.id).slice(0,8)}`;
+                sessionsModalSelect.appendChild(opt);
+            });
+        }
+    } catch (err) {
+        console.debug('Sessions modal list failed', err);
+        if (sessionsModalSelect) sessionsModalSelect.innerHTML = '';
+    }
+}
+
+function syncVoiceSettingsDrawer() {
+    if (!state || !state.voice) return;
+    if (toggleBrowserAsr2) toggleBrowserAsr2.checked = !!(state.voice.config && state.voice.config.useBrowserAsr);
+    if (toggleShowMetadata2) toggleShowMetadata2.checked = !!(state.voice.config && state.voice.config.showMetadata);
+    if (coachLevelSelect && coachLevelSelect2) coachLevelSelect2.value = coachLevelSelect.value;
+    // Populate voices into drawer select if empty
+    if (voiceSelect && voiceSelect2 && voiceSelect2.options.length <= 1 && voiceSelect.options.length > 0) {
+        voiceSelect2.innerHTML = '';
+        Array.from(voiceSelect.options).forEach(opt => {
+            const o = document.createElement('option');
+            o.value = opt.value; o.textContent = opt.textContent; if (opt.dataset.previewUrl) o.dataset.previewUrl = opt.dataset.previewUrl;
+            voiceSelect2.appendChild(o);
+        });
+        voiceSelect2.value = voiceSelect.value;
+    }
+}
+
+// Keyboard shortcuts
+document.addEventListener('keydown', (e) => {
+    if (!state || !state.questions || state.questions.length === 0) return;
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+    const k = e.key.toLowerCase();
+    if (k === 'j' || e.key === 'ArrowRight') {
+        e.preventDefault();
+        handleNextQuestion();
+    } else if (k === 'k' || e.key === 'ArrowLeft') {
+        e.preventDefault();
+        if (state.currentQuestionIndex > 0) displayQuestion(state.currentQuestionIndex - 1);
+    } else if (k === 'v') {
+        e.preventDefault();
+        if (state.voice && state.voice.peer) { stopVoiceInterview(); } else { startVoiceInterview(); }
+    } else if (k === 'm') {
+        e.preventDefault(); toggleMuteVoice();
+    } else if (k === 'e') {
+        e.preventDefault(); exportFullTranscript();
+    } else if (k === 'g') {
+        e.preventDefault(); buildQuestionRail(); if (questionDrawer) questionDrawer.classList.remove('hidden');
+    }
+});
