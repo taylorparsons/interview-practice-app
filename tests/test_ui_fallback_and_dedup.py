@@ -15,8 +15,8 @@ def test_fallback_default_off_in_js():
     js = _read_text(JS_PATH)
     # Ensure the initial voice state respects APP_CONFIG defaults (false when unspecified)
     assert "window.APP_CONFIG" in js
-    assert "voiceConfig = (typeof window" in js
-    assert "useBrowserAsr: !!voiceConfig.useBrowserAsr" in js
+    assert "const appVoiceConfig" in js
+    assert "useBrowserAsr: !!appVoiceConfig.useBrowserAsr" in js
 
 
 def test_browser_fallback_checkbox_removed_from_ui():

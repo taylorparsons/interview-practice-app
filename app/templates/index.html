@@ -166,26 +166,11 @@
                             <span data-indicator-dot class="inline-flex h-2.5 w-2.5 rounded-full bg-gray-300 transition"></span>
                             <span data-indicator-label>Mic idle</span>
                         </div>
-                        <div id="voice-settings-pre" class="mt-2 flex flex-wrap items-center gap-4 text-xs text-gray-600">
-                            <div class="inline-flex items-center gap-2">
-                                <label for="coach-level-select" class="text-gray-600">Coaching Level</label>
-                                <select id="coach-level-select" class="border border-gray-300 rounded-md text-xs py-1 px-2">
-                                    <option value="level_1" selected>Help</option>
-                                    <option value="level_2">Strict</option>
-                                </select>
-                                <button id="coach-level-save" class="py-1 px-2 border border-indigo-300 rounded-md bg-indigo-50 text-indigo-700 hover:bg-indigo-100">Save</button>
-                            </div>
-                            <div class="inline-flex items-center gap-2">
-                                <label for="voice-select" class="text-gray-600">Voice</label>
-                                <select id="voice-select" class="border border-gray-300 rounded-md text-xs py-1 px-2">
-                                    <option value="">Loading…</option>
-                                </select>
-                                <button id="voice-preview" class="py-1 px-2 border border-gray-300 rounded-md bg-white hover:bg-gray-50">Preview</button>
-                                <button id="voice-save" class="py-1 px-2 border border-indigo-300 rounded-md bg-indigo-50 text-indigo-700 hover:bg-indigo-100">Save</button>
-                                <audio id="voice-preview-audio" class="hidden"></audio>
-                            </div>
+                        {% set coach_level_label = 'Strict' if coach_level_default == 'level_2' else 'Help' %}
+                        <div class="mt-2 text-xs text-gray-600" id="voice-settings-summary">
+                            Coaching Level: <span id="voice-summary-coach-level">{{ coach_level_label }}</span> · Voice: <span id="voice-summary-voice">{{ openai_realtime_voice }}</span>
                         </div>
-                        <div class="mt-2 text-xs text-gray-500" id="voice-config-summary">
+                        <div class="mt-1 text-xs text-gray-500" id="voice-config-summary">
                             Browser transcription fallback: <span id="voice-config-fallback-state">{{ 'Enabled' if voice_browser_fallback_default else 'Disabled' }}</span> · Transcript metadata: <span id="voice-config-metadata-state">{{ 'Shown' if voice_show_metadata_default else 'Hidden' }}</span>
                         </div>
                         <audio id="voice-audio" autoplay playsinline class="hidden"></audio>
@@ -398,8 +383,10 @@
     <script>
         window.APP_CONFIG = window.APP_CONFIG || {};
         window.APP_CONFIG.voice = {
-            useBrowserAsr: {{ 'true' if voice_browser_fallback_default else 'false' }},
-            showMetadata: {{ 'true' if voice_show_metadata_default else 'false' }}
+            useBrowserAsr: {{ voice_browser_fallback_default | tojson }},
+            showMetadata: {{ voice_show_metadata_default | tojson }},
+            defaultVoiceId: {{ openai_realtime_voice | tojson }},
+            defaultCoachLevel: {{ coach_level_default | tojson }}
         };
     </script>
     <script src="/static/js/app.js"></script>

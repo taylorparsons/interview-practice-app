@@ -1,8 +1,9 @@
 // app/static/js/app.js
 
+const appVoiceConfig = (typeof window !== 'undefined' && window.APP_CONFIG && window.APP_CONFIG.voice) || {};
+
 // State management
 function createInitialVoiceState() {
-    const voiceConfig = (typeof window !== 'undefined' && window.APP_CONFIG && window.APP_CONFIG.voice) || {};
     return {
         peer: null,
         dataChannel: null,
@@ -25,9 +26,10 @@ function createInitialVoiceState() {
         // start a new bubble or continue the previous one.
         lastFinalSpeaker: '',
         config: {
-            useBrowserAsr: !!voiceConfig.useBrowserAsr,
-            showMetadata: !!voiceConfig.showMetadata,
+            useBrowserAsr: !!appVoiceConfig.useBrowserAsr,
+            showMetadata: !!appVoiceConfig.showMetadata,
         },
+        selectedVoiceId: appVoiceConfig.defaultVoiceId || '',
     };
 }
 
@@ -39,6 +41,7 @@ function createInitialState() {
         currentQuestionIndex: 0,
         answers: [],
         evaluations: [],
+        coachLevel: appVoiceConfig.defaultCoachLevel || 'level_1',
         reviewFlags: {},
         room: null,
         participant: null,
@@ -49,6 +52,7 @@ function createInitialState() {
 }
 
 let state = createInitialState();
+syncVoiceSettingsSummary();
 
 // DOM elements
 const uploadSection = document.getElementById('upload-section');
@@ -122,13 +126,8 @@ const voiceActivityLabel = voiceActivityIndicator
     ? voiceActivityIndicator.querySelector('[data-indicator-label]')
     : null;
 const exportTranscriptBtn = document.getElementById('export-transcript');
-const voiceSelect = document.getElementById('voice-select');
-const voicePreviewBtn = document.getElementById('voice-preview');
-const voiceSaveBtn = document.getElementById('voice-save');
-const voicePreviewAudio = document.getElementById('voice-preview-audio');
-// Coaching level controls
-const coachLevelSelect = document.getElementById('coach-level-select');
-const coachLevelSaveBtn = document.getElementById('coach-level-save');
+const voiceSummaryCoachLevel = document.getElementById('voice-summary-coach-level');
+const voiceSummaryVoice = document.getElementById('voice-summary-voice');
 // Voice submission button (parity with typed Submit)
 const submitVoiceBtn = document.getElementById('submit-voice-answer');
 const muteVoiceBtn = document.getElementById('mute-voice');
@@ -167,6 +166,11 @@ const voiceSelect2Retry = document.getElementById('voice-select-2-retry');
 const voiceFallbackStateEl = document.getElementById('voice-config-fallback-state');
 const voiceMetadataStateEl = document.getElementById('voice-config-metadata-state');
 
+const COACH_LEVEL_LABELS = {
+    level_1: 'Help',
+    level_2: 'Strict',
+};
+
 const voiceStatusClasses = {
     idle: 'text-gray-500',
     pending: 'text-amber-600',
@@ -183,6 +187,15 @@ const voiceActivityModes = {
     unsupported: { dot: 'bg-gray-400', label: 'Mic level unavailable' },
 };
 let voiceActivityState = 'idle';
+
+function getVoiceLabelById(id) {
+    if (!id) return appVoiceConfig.defaultVoiceId || '';
+    if (__voicesCache && Array.isArray(__voicesCache)) {
+        const match = __voicesCache.find((v) => v && v.id === id);
+        if (match) return match.label || match.id;
+    }
+    return id;
+}
 
 function setVoiceControls(active) {
     if (startVoiceBtn) {
@@ -1537,9 +1550,8 @@ document.addEventListener('DOMContentLoaded', () => {
     setVoiceEnabled(false);
     refreshSessionsList(state.sessionId);
         refreshSwitcherList();
-    initVoiceSelector();
-    // Initialize coach level select/save (loads current level on active session)
-    (async () => { try { await initCoachLevelSelector(); } catch (_) {} })();
+    // Prime voice settings summary with config defaults
+    ensureVoicesCatalog().then(() => syncVoiceSettingsSummary()).catch(() => {});
     // Voice configuration is controlled via server config; update summary text
     syncVoiceSettingsSummary();
     if (exportTranscriptBtn) {
@@ -1654,8 +1666,8 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 const r = await fetch(`/session/${state.sessionId}/voice`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ voice_id: voiceId }) });
                 if (!r.ok) throw new Error(await r.text());
-                if (voiceSelect) voiceSelect.value = voiceId;
-                // Offer to apply immediately by restarting the voice session
+                state.voice.selectedVoiceId = voiceId;
+                syncVoiceSettingsSummary();
                 let applied = false;
                 if (state.voice && state.voice.peer) {
                     applied = confirm('Voice saved. Restart the voice session now to apply the new voice?');
@@ -1667,6 +1679,26 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!applied) alert('Voice saved. New prompts will use this voice.');
             } catch (err) {
                 alert(err.message || 'Unable to save voice');
+            }
+        });
+    }
+    if (coachLevelSaveBtn2 && coachLevelSelect2) {
+        coachLevelSaveBtn2.addEventListener('click', async (e) => {
+            e.preventDefault();
+            if (!state.sessionId) return alert('Start or resume a session first.');
+            const level = coachLevelSelect2.value || 'level_1';
+            try {
+                const r = await fetch(`/session/${state.sessionId}/coach-level`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ level })
+                });
+                if (!r.ok) throw new Error(await r.text());
+                state.coachLevel = level;
+                syncVoiceSettingsSummary();
+                alert('Coaching level saved. New prompts will use this level.');
+            } catch (err) {
+                alert(err.message || 'Unable to save level');
             }
         });
     }
@@ -1759,112 +1791,6 @@ function setupEventListeners() {
     }
 }
 
-async function initVoiceSelector() {
-    try {
-        const voices = await ensureVoicesCatalog();
-        if (voiceSelect) {
-            while (voiceSelect.firstChild) voiceSelect.removeChild(voiceSelect.firstChild);
-            voices.forEach(v => {
-                const opt = document.createElement('option');
-                opt.value = v.id;
-                opt.textContent = v.label || v.id;
-                if (v.preview_url) opt.dataset.previewUrl = v.preview_url;
-                voiceSelect.appendChild(opt);
-            });
-        }
-        if (voicePreviewBtn && voiceSelect && voicePreviewAudio) {
-            const setPreviewLoading = (loading) => {
-                const orig = voicePreviewBtn.dataset.origLabel || voicePreviewBtn.textContent;
-                if (!voicePreviewBtn.dataset.origLabel) {
-                    voicePreviewBtn.dataset.origLabel = orig;
-                }
-                voicePreviewBtn.disabled = !!loading;
-                voicePreviewBtn.classList.toggle('opacity-50', !!loading);
-                voiceSelect.disabled = !!loading;
-                if (startVoiceBtn) startVoiceBtn.disabled = !!loading;
-                voicePreviewBtn.textContent = loading ? 'Loading…' : voicePreviewBtn.dataset.origLabel;
-            };
-
-            // Ensure UI is restored when preview finishes or errors
-            const attachAutoRestore = () => {
-                const restore = () => setPreviewLoading(false);
-                voicePreviewAudio.addEventListener('playing', restore, { once: true });
-                voicePreviewAudio.addEventListener('canplay', restore, { once: true });
-                voicePreviewAudio.addEventListener('error', restore, { once: true });
-                voicePreviewAudio.addEventListener('ended', restore, { once: true });
-            };
-
-            voicePreviewBtn.addEventListener('click', async (e) => {
-                e.preventDefault();
-                const opt = voiceSelect.options[voiceSelect.selectedIndex];
-                let url = opt && opt.dataset.previewUrl;
-                if (!url && opt && opt.value) url = `/voices/preview/${encodeURIComponent(opt.value)}`; // fallback
-                if (!url) {
-                    alert('No preview available for this voice.');
-                    return;
-                }
-                try {
-                    // UI loading state
-                    setPreviewLoading(true);
-                    attachAutoRestore();
-                    // Stop any current preview
-                    try { voicePreviewAudio.pause(); } catch (_) {}
-                    voicePreviewAudio.currentTime = 0;
-                    // Start new preview
-                    voicePreviewAudio.src = url;
-                    voicePreviewAudio.classList.remove('hidden');
-                    await voicePreviewAudio.play().catch(() => {});
-                } catch (_) {
-                    setPreviewLoading(false);
-                }
-            });
-        }
-        if (voiceSaveBtn && voiceSelect) {
-            voiceSaveBtn.addEventListener('click', async (e) => {
-                e.preventDefault();
-                if (!state.sessionId) {
-                    alert('Start or resume a session first.');
-                    return;
-                }
-                const voiceId = voiceSelect.value;
-                if (!voiceId) return;
-                try {
-                    const r = await fetch(`/session/${state.sessionId}/voice`, {
-                        method: 'PATCH',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ voice_id: voiceId })
-                    });
-                    if (!r.ok) {
-                        const detail = await r.text();
-                        throw new Error(detail || 'Failed to save voice');
-                    }
-                    // Mirror selection into the drawer select if present
-                    if (voiceSelect2) {
-                        voiceSelect2.value = voiceId;
-                    }
-                    // Offer to apply immediately by restarting the voice session
-                    let applied = false;
-                    if (state.voice && state.voice.peer) {
-                        applied = confirm('Voice saved. Restart the voice session now to apply the new voice?');
-                        if (applied) {
-                            try { stopVoiceInterview({ silent: true }); } catch (_) {}
-                            setTimeout(() => startVoiceInterview(), 150);
-                        }
-                    }
-                    if (!applied) alert('Voice saved. New prompts will use this voice.');
-                } catch (err) {
-                    alert(err.message || 'Unable to save voice');
-                }
-            });
-        }
-    } catch (err) {
-        console.warn('Voice catalog unavailable:', err);
-    }
-}
-
-// Shared voices loader with cache + retry
-let __voicesCache = null;
-let __voicesPromise = null;
 async function ensureVoicesCatalog(force = false) {
     if (!force && __voicesCache && Array.isArray(__voicesCache) && __voicesCache.length > 0) {
         return __voicesCache;
@@ -1875,50 +1801,12 @@ async function ensureVoicesCatalog(force = false) {
         if (!res.ok) throw new Error('Failed to load voices');
         const list = await res.json();
         __voicesCache = Array.isArray(list) ? list : [];
+        syncVoiceSettingsSummary();
         return __voicesCache;
     })().finally(() => {
         __voicesPromise = null;
     });
     return __voicesPromise;
-}
-
-async function initCoachLevelSelector() {
-    if (!coachLevelSelect) return;
-    try {
-        if (state.sessionId) {
-            const r = await fetch(`/session/${state.sessionId}`);
-            if (r.ok) {
-                const data = await r.json();
-                const lvl = (data && data.coach_level) || 'level_1';
-                coachLevelSelect.value = lvl;
-            }
-        }
-    } catch (_) {}
-
-    if (coachLevelSaveBtn) {
-        coachLevelSaveBtn.addEventListener('click', async (e) => {
-            e.preventDefault();
-            if (!state.sessionId) {
-                alert('Start or resume a session first.');
-                return;
-            }
-            const lvl = coachLevelSelect.value || 'level_1';
-            try {
-                const r = await fetch(`/session/${state.sessionId}/coach-level`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ level: lvl })
-                });
-                if (!r.ok) {
-                    const t = await r.text();
-                    throw new Error(t || 'Failed to save level');
-                }
-                alert('Coaching level saved. New prompts will use this level.');
-            } catch (err) {
-                alert(err.message || 'Unable to save level');
-            }
-        });
-    }
 }
 
 function exportFullTranscript() {
@@ -2222,6 +2110,12 @@ async function resumeSavedSession(sessionIdOverride = null) {
         state.questions = data.questions || [];
         state.answers = data.answers || [];
         state.evaluations = data.evaluations || [];
+        state.coachLevel = (data && data.coach_level) || state.coachLevel;
+        const savedVoiceId = data && data.voice_settings && data.voice_settings.voice_id;
+        if (savedVoiceId) {
+            state.voice.selectedVoiceId = savedVoiceId;
+        }
+        syncVoiceSettingsDrawer();
         localStorage.setItem('interviewSessionId', state.sessionId);
 
         const persistedIndex = typeof data.current_question_index === 'number'
@@ -2376,6 +2270,9 @@ async function handleDocumentUpload(e) {
         
         const data = await response.json();
         state.sessionId = data.session_id;
+        state.coachLevel = appVoiceConfig.defaultCoachLevel || 'level_1';
+        state.voice.selectedVoiceId = appVoiceConfig.defaultVoiceId || state.voice.selectedVoiceId;
+        syncVoiceSettingsSummary();
         localStorage.setItem('interviewSessionId', state.sessionId);
         updateResumeControlsVisibility();
         
@@ -3108,12 +3005,25 @@ function syncVoiceSettingsSummary() {
     const metadataEnabled = !!(state.voice.config && state.voice.config.showMetadata);
     if (voiceFallbackStateEl) voiceFallbackStateEl.textContent = fallbackEnabled ? 'Enabled' : 'Disabled';
     if (voiceMetadataStateEl) voiceMetadataStateEl.textContent = metadataEnabled ? 'Shown' : 'Hidden';
+    if (voiceSummaryCoachLevel) {
+        const level = state.coachLevel || appVoiceConfig.defaultCoachLevel || 'level_1';
+        voiceSummaryCoachLevel.textContent = COACH_LEVEL_LABELS[level] || level;
+    }
+    if (voiceSummaryVoice) {
+        const voiceId = state.voice.selectedVoiceId || appVoiceConfig.defaultVoiceId || '';
+        voiceSummaryVoice.textContent = getVoiceLabelById(voiceId);
+    }
 }
 
 function syncVoiceSettingsDrawer() {
     syncVoiceSettingsSummary();
-    if (coachLevelSelect && coachLevelSelect2) coachLevelSelect2.value = coachLevelSelect.value;
-    // Voices population handled by populateVoiceSettingsDrawer()
+    if (coachLevelSelect2) {
+        coachLevelSelect2.value = state.coachLevel || appVoiceConfig.defaultCoachLevel || 'level_1';
+    }
+    if (voiceSelect2) {
+        const desiredVoice = state.voice.selectedVoiceId || appVoiceConfig.defaultVoiceId || '';
+        voiceSelect2.value = desiredVoice;
+    }
 }
 
 async function populateVoiceSettingsDrawer() {
@@ -3139,8 +3049,8 @@ async function populateVoiceSettingsDrawer() {
                     if (v.preview_url) o.dataset.previewUrl = v.preview_url;
                     voiceSelect2.appendChild(o);
                 });
-                // default to main select selection if any
-                if (voiceSelect && voiceSelect.value) voiceSelect2.value = voiceSelect.value;
+                const desiredVoice = state.voice.selectedVoiceId || appVoiceConfig.defaultVoiceId || '';
+                voiceSelect2.value = desiredVoice;
             }
         }
         syncVoiceSettingsDrawer();
