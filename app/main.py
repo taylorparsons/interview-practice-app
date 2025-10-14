@@ -22,7 +22,6 @@ from app.config import (
     OPENAI_TURN_DETECTION, OPENAI_TURN_THRESHOLD, OPENAI_TURN_PREFIX_MS, OPENAI_TURN_SILENCE_MS,
     OPENAI_INPUT_TRANSCRIPTION_MODEL,
     UPLOAD_FOLDER, ALLOWED_EXTENSIONS,
-    VOICE_BROWSER_FALLBACK_DEFAULT, VOICE_SHOW_METADATA_DEFAULT,
 )
 from app.utils.document_processor import allowed_file, save_uploaded_file, save_text_as_file, process_documents
 from app.models.interview_agent import InterviewPracticeAgent, get_base_coach_prompt
@@ -259,14 +258,7 @@ class SetCoachLevelRequest(BaseModel):
 # Routes
 @app.get("/", response_class=HTMLResponse)
 async def get_index(request: Request):
-    return templates.TemplateResponse(
-        "index.html",
-        {
-            "request": request,
-            "voice_browser_fallback_default": VOICE_BROWSER_FALLBACK_DEFAULT,
-            "voice_show_metadata_default": VOICE_SHOW_METADATA_DEFAULT,
-        },
-    )
+    return templates.TemplateResponse("index.html", {"request": request})
 
 
 @app.post("/upload-documents", response_model=DocumentUploadResponse)
