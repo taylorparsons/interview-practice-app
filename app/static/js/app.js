@@ -18,6 +18,7 @@ function createInitialState() {
     return {
         sessionId: null,
         sessionName: null,
+        agentName: (typeof localStorage !== 'undefined' && localStorage.getItem('agentName')) || 'Coach',
         questions: [],
         currentQuestionIndex: 0,
         answers: [],
@@ -91,6 +92,7 @@ const voiceStatus = document.getElementById('voice-status');
 const voiceTranscript = document.getElementById('voice-transcript');
 const voiceAudio = document.getElementById('voice-audio');
 const rememberBtn = document.getElementById('remember-snippet');
+const agentNameInput = document.getElementById('agent-name');
 
 const voiceStatusClasses = {
     idle: 'text-gray-500',
@@ -173,7 +175,7 @@ function appendVoiceMessage(role, message, options = {}) {
     if (role === 'agent' || role === 'user') {
         const label = document.createElement('div');
         label.className = 'text-xs uppercase tracking-wide font-semibold mb-1';
-        label.textContent = role === 'agent' ? 'Coach' : 'You';
+        label.textContent = role === 'agent' ? (state.agentName || 'Coach') : 'You';
         wrapper.appendChild(label);
 
         const content = document.createElement('p');
@@ -438,6 +440,18 @@ if (rememberBtn) {
     rememberBtn.addEventListener('click', () => triggerMemorize({ keyword: false }));
 }
 
+// Handle agent name input + persistence
+if (agentNameInput) {
+    // Initialize from state/localStorage
+    agentNameInput.value = state.agentName || '';
+    agentNameInput.addEventListener('change', () => {
+        const val = (agentNameInput.value || '').trim();
+        state.agentName = val || 'Coach';
+        try { localStorage.setItem('agentName', state.agentName); } catch (e) {}
+        appendVoiceMessage('system', `Agent name set to ${state.agentName}.`);
+    });
+}
+
 async function startVoiceInterview() {
     if (!state.sessionId) {
         alert('Upload your documents to start a practice session before enabling voice coaching.');
@@ -461,7 +475,8 @@ async function startVoiceInterview() {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                session_id: state.sessionId
+                session_id: state.sessionId,
+                agent_name: state.agentName || 'Coach'
             })
         });
 

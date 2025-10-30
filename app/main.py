@@ -186,6 +186,7 @@ class ExampleAnswerResponse(BaseModel):
 class VoiceSessionRequest(BaseModel):
     session_id: str
     voice: Optional[str] = None
+    agent_name: Optional[str] = None
 
 
 class VoiceSessionResponse(BaseModel):
@@ -869,7 +870,7 @@ def _truncate_text(text: str, limit: int = 1200) -> str:
     return f"{text[: limit - 3].rstrip()}..."
 
 
-def _build_voice_instructions(session_id: str, session: Dict[str, Any]) -> str:
+def _build_voice_instructions(session_id: str, session: Dict[str, Any], agent_name: Optional[str] = None) -> str:
     """Create instructions for the realtime voice agent based on session context.
 
     Prepends the same system-level coach persona used by the text agent to
@@ -905,6 +906,7 @@ def _build_voice_instructions(session_id: str, session: Dict[str, Any]) -> str:
         relevant_snippets = []
 
     base_prompt = get_base_coach_prompt()
+    name_line = f"You are the interview coach named '{(agent_name or 'Coach')}'.".strip()
 
     snippets_block = "\n".join(relevant_snippets) if relevant_snippets else "- (No stored work-history snippets found)"
 
@@ -912,6 +914,7 @@ def _build_voice_instructions(session_id: str, session: Dict[str, Any]) -> str:
 {base_prompt}
 
 # Realtime Voice Context (session {session_id}):
+{name_line}
 Candidate resume excerpt:
 {resume_excerpt}
 
@@ -943,7 +946,7 @@ async def create_voice_session(request: VoiceSessionRequest):
 
     session = _get_session(request.session_id)
     voice_name = request.voice or OPENAI_REALTIME_VOICE
-    instructions = _build_voice_instructions(request.session_id, session)
+    instructions = _build_voice_instructions(request.session_id, session, request.agent_name)
 
     payload: Dict[str, Any] = {
         "model": OPENAI_REALTIME_MODEL,
