@@ -6,6 +6,7 @@ import re
 from typing import Dict, List, Any, Optional
 
 from openai import AsyncOpenAI
+from app.utils.prompt_loader import load_prompt_template
 
 logger = logging.getLogger(__name__)
 
@@ -38,19 +39,55 @@ You are a Helpful Interview Coach. Your goal is to guide the candidate with cons
     if persona == "discovery":
         return (
             """
-# Role:
-You are a Discovery Interview Coach focused on eliciting strong narratives from the candidate's work history.
+# Project Instructions: Voice Agent for Work History Narrative Discovery (RISEN++)
 
-# Instructions:
-- Help the candidate uncover and shape stories for common behavioral prompts (leadership, conflict, ambiguity, delivery, failure, customer focus).
-- Use STAR + I and ask targeted questions to identify Situation, Task, Action, Result, and measurable Impact.
-- Probe for specifics: scale, metrics, stakeholders, dates, risks, decisions, alternatives, trade-offs.
-- Suggest how to phrase concise narrative bullets and how to adapt stories to different competencies.
+## Role:
+You are a Discovery Interview Coach helping users explore meaningful stories from their work history. Your job is to guide reflection, not to rehearse answers.
 
-# Style and Tone:
-- Curious, supportive, and practical.
-- Keep prompts short and focused.
-- Provide concrete templates and example bullets when helpful.
+## Instructions:
+Lead users through short, thoughtful conversations to help them uncover real experiences that show leadership, conflict resolution, ambiguity, ownership, failure, and customer impact. Use the STAR + Impact model as a gentle framework, not a script.
+
+Ask open-ended questions, listen actively, and help users shape their stories naturally. Keep the tone curious and supportive.
+
+## Steps:
+1. Start broad: Ask reflective prompts like:
+   - “What’s a time you were most proud of your work?”
+   - “When did you face a tough decision at work?”
+2. Let them share freely. Listen for a clear Situation and Task.
+3. Guide them to unpack Actions and Results with simple follow-ups like:
+   - “What did you do next?”
+   - “What changed because of your actions?”
+4. Ask about Impact: “What was the outcome? Did it affect people, goals, or customers?”
+5. Gently probe: scope, stakeholders, decisions, trade-offs.
+6. Reflect back what you hear: “Sounds like a leadership moment. Want to explore that angle?”
+7. Help them summarize with phrases like: “So that shows your ability to lead under pressure.”
+
+## Expectations:
+- Keep the user talking and reflecting, not just answering.
+- Surface rich, specific work stories tied to real challenges and outcomes.
+- Highlight transferable themes like ownership or learning.
+- Keep each turn short and easy to process.
+- Offer to explore the same story from different angles if it fits multiple themes.
+
+## Narrow:
+- Focus only on professional or academic experiences.
+- No resume writing, technical prep, or mock interviews.
+- Always keep it discovery-focused, not performance-based.
+
+## Rating:
+Internally rate each interaction on:
+- Depth of story discovery
+- Clarity of STAR elements
+- Engagement and reflection by the user
+- Tone and pace
+
+If below 0.8, simplify your questions and slow down the pace for better user clarity.
+
+## Style and Tone:
+- Warm, curious, and encouraging.
+- Use short sentences and natural phrasing.
+- Let silence be okay—give users space to think.
+- Avoid jargon; speak like a thoughtful guide, not an evaluator.
             """
         ).strip()
     # default 'ruthless'
@@ -103,18 +140,18 @@ class InterviewPracticeAgent:
     
     async def generate_interview_questions(self, num_questions: int = 5) -> List[str]:
         """Generate interview questions based on resume and job description."""
-        system_prompt = get_coach_prompt(self.persona)
-        
-        user_prompt = f"""
-        Resume:
-        {self.resume_text}
-        
-        Job Description:
-        {self.job_description_text}
-        
-        Generate {num_questions} interview questions for this candidate based on their resume and the job description.
-        Return the response as a JSON array of question strings.
-        """
+        system_prompt = load_prompt_template(self.persona, "questions", "system") or get_coach_prompt(self.persona)
+
+        user_tpl = load_prompt_template(self.persona, "questions", "user") or (
+            "Resume:\n{resume_text}\n\nJob Description:\n{job_description_text}\n\n"
+            "Generate {num_questions} interview questions for this candidate based on their resume and the job description.\n"
+            "Return the response as a JSON array of question strings."
+        )
+        user_prompt = user_tpl.format(
+            resume_text=self.resume_text,
+            job_description_text=self.job_description_text,
+            num_questions=num_questions,
+        )
         
         # Generate questions using the ChatGPT API
         response = await self.client.chat.completions.create(
@@ -179,24 +216,21 @@ class InterviewPracticeAgent:
     
     async def evaluate_answer(self, question: str, answer: str, voice_transcript: Optional[str] = None) -> Dict[str, Any]:
         """Evaluate candidate's answer to an interview question."""
-        system_prompt = f"""
-{get_coach_prompt(self.persona)}
-
-Evaluate the candidate's answer to the interview question. Return a strict JSON object with keys:
-- score (1-10), strengths [..], weaknesses [..], feedback (actionable), why_asked (competency), example_improvement (concise improved answer).
-        """
+        system_prompt = load_prompt_template(self.persona, "evaluation", "system") or (
+            f"{get_coach_prompt(self.persona)}\n\n"
+            "Evaluate the candidate's answer to the interview question. Return a strict JSON object with keys:\n"
+            "- score (1-10), strengths [..], weaknesses [..], feedback (actionable), why_asked (competency), example_improvement (concise improved answer)."
+        )
         
         vt = (voice_transcript or "").strip()
-        vt_block = f"\n\nVoice Transcript (if any):\n{vt}\n" if vt else ""
-
-        user_prompt = f"""
-        Interview Question: {question}
-        
-        Candidate's Answer: {answer}
-        {vt_block}
-        
-        Please evaluate this response.
-        """
+        user_tpl = load_prompt_template(self.persona, "evaluation", "user") or (
+            "Interview Question: {question}\n\n"
+            "Candidate's Answer: {answer}\n\n"
+            "{voice_transcript_block}\n"
+            "Please evaluate this response."
+        )
+        vt_block = f"Voice Transcript (if any):\n{vt}\n\n" if vt else ""
+        user_prompt = user_tpl.format(question=question, answer=answer, voice_transcript_block=vt_block)
         
         logger.info("Evaluating answer for question: %s", question)
         
@@ -268,33 +302,28 @@ Evaluate the candidate's answer to the interview question. Return a strict JSON 
     async def generate_example_answer(self, question: str) -> str:
         """Generate an example good answer to an interview question."""
         base_prompt = get_coach_prompt(self.persona)
-        system_prompt = f"""
-{base_prompt}
+        system_prompt = load_prompt_template(self.persona, "example", "system") or (
+            f"{base_prompt}\n\n"
+            "You are now providing a tailored, exemplary answer to the candidate's interview question.\n\n"
+            "Requirements:\n"
+            "- Draw directly from the candidate's resume wherever relevant (roles, companies, projects, technologies, metrics, scope, team size, timelines).\n"
+            "- Align to the job description priorities and mirror key terminology for the role.\n"
+            "- When applicable, structure with STAR + I (Situation, Task, Action, Result, Impact) and quantify outcomes with concrete numbers.\n"
+            "- Keep tone confident, concise, and conversational (not scripted).\n"
+            "- Target length ~120–220 words unless the question demands more.\n\n"
+            "Output:\n- Return only the answer text, no preface, labels, or lists unless the question explicitly asks for them."
+        )
 
-You are now providing a tailored, exemplary answer to the candidate's interview question.
-
-Requirements:
-- Draw directly from the candidate's resume wherever relevant (roles, companies, projects, technologies, metrics, scope, team size, timelines).
-- Align to the job description priorities and mirror key terminology for the role.
-- When applicable, structure with STAR + I (Situation, Task, Action, Result, Impact) and quantify outcomes with concrete numbers.
-- Keep tone confident, concise, and conversational (not scripted).
-- Target length ~120–220 words unless the question demands more.
-
-Output:
-- Return only the answer text, no preface, labels, or lists unless the question explicitly asks for them.
-        """
-        
-        user_prompt = f"""
-        Interview Question: {question}
-        
-        Please provide an exemplary answer to this question based on the following resume and job description:
-        
-        Resume:
-        {self.resume_text}
-        
-        Job Description:
-        {self.job_description_text}
-        """
+        user_tpl = load_prompt_template(self.persona, "example", "user") or (
+            "Interview Question: {question}\n\n"
+            "Please provide an exemplary answer to this question based on the following resume and job description:\n\n"
+            "Resume:\n{resume_text}\n\nJob Description:\n{job_description_text}"
+        )
+        user_prompt = user_tpl.format(
+            question=question,
+            resume_text=self.resume_text,
+            job_description_text=self.job_description_text,
+        )
         
         # Generate example answer using the ChatGPT API
         response = await self.client.chat.completions.create(

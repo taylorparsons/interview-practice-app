@@ -1,0 +1,7 @@
+Interview Question: {question}
+
+Candidate's Answer: {answer}
+
+{voice_transcript_block}
+Please evaluate this response with emphasis on STAR+I completeness and actionable next steps to strengthen the story.
+

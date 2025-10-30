@@ -1,0 +1,10 @@
+Interview Question: {question}
+
+Please provide an exemplary answer to this question based on the following resume and job description:
+
+Resume:
+{resume_text}
+
+Job Description:
+{job_description_text}
+

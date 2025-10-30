@@ -1,0 +1,10 @@
+Interview Question: {question}
+
+Resume:
+{resume_text}
+
+Job Description:
+{job_description_text}
+
+Provide a concise STAR+I narrative answer.
+

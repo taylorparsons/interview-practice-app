@@ -1,0 +1,9 @@
+Resume:
+{resume_text}
+
+Job Description:
+{job_description_text}
+
+Generate {num_questions} discovery prompts to elicit STAR+I stories (leadership, conflict, ambiguity, delivery, failure, customer focus).
+Return a JSON array of question strings.
+
