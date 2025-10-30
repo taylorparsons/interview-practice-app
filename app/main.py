@@ -187,6 +187,7 @@ class VoiceSessionRequest(BaseModel):
     session_id: str
     voice: Optional[str] = None
     agent_name: Optional[str] = None
+    persona: Optional[str] = None
 
 
 class VoiceSessionResponse(BaseModel):
@@ -239,6 +240,10 @@ class MemorizeTranscriptRequest(BaseModel):
     text: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
     summarize: bool = False
+
+
+class SetCoachPersonaRequest(BaseModel):
+    persona: str
 
 
 # Routes
@@ -294,6 +299,7 @@ async def upload_documents(
         "resume_text": resume_text,
         "job_desc_text": job_desc_text,
         "name": default_name,
+        "coach_persona": "ruthless",
         "questions": [],
         "answers": [],
         "evaluations": [],
@@ -576,6 +582,7 @@ async def get_session_status(session_id: str):
     return {
         "session_id": session_id,
         "name": session.get("name"),
+        "coach_persona": session.get("coach_persona", "ruthless"),
         "questions": session["questions"],
         "answers": session["answers"],
         "evaluations": session["evaluations"],
@@ -860,6 +867,25 @@ async def rename_session(session_id: str, request: RenameSessionRequest):
     return {"session_id": session_id, "name": new_name}
 
 
+@app.patch("/session/{session_id}/coach")
+async def set_coach_persona(session_id: str, request: SetCoachPersonaRequest):
+    """Set the coach persona for a session: ruthless | helpful | discovery."""
+    session = _get_session(session_id)
+    persona = (request.persona or "").strip().lower()
+    if persona not in {"ruthless", "helpful", "discovery"}:
+        raise HTTPException(status_code=400, detail="Invalid persona. Use ruthless, helpful, or discovery.")
+    session["coach_persona"] = persona
+    _persist_session_state(session_id, session)
+    # If an agent exists, update it in-place
+    try:
+        agent = session.get("agent")
+        if agent is not None:
+            agent.persona = persona
+    except Exception:
+        pass
+    return {"session_id": session_id, "coach_persona": persona}
+
+
 def _truncate_text(text: str, limit: int = 1200) -> str:
     """Return a trimmed preview of longer text snippets."""
     if not text:
@@ -870,7 +896,7 @@ def _truncate_text(text: str, limit: int = 1200) -> str:
     return f"{text[: limit - 3].rstrip()}..."
 
 
-def _build_voice_instructions(session_id: str, session: Dict[str, Any], agent_name: Optional[str] = None) -> str:
+def _build_voice_instructions(session_id: str, session: Dict[str, Any], agent_name: Optional[str] = None, persona: Optional[str] = None) -> str:
     """Create instructions for the realtime voice agent based on session context.
 
     Prepends the same system-level coach persona used by the text agent to
@@ -905,7 +931,8 @@ def _build_voice_instructions(session_id: str, session: Dict[str, Any], agent_na
         logger.exception("knowledge.search.error: session=%s", session_id)
         relevant_snippets = []
 
-    base_prompt = get_base_coach_prompt()
+    from app.models.interview_agent import get_coach_prompt
+    base_prompt = get_coach_prompt(persona or session.get("coach_persona") or "ruthless")
     name_line = f"You are the interview coach named '{(agent_name or 'Coach')}'.".strip()
 
     snippets_block = "\n".join(relevant_snippets) if relevant_snippets else "- (No stored work-history snippets found)"
@@ -946,7 +973,8 @@ async def create_voice_session(request: VoiceSessionRequest):
 
     session = _get_session(request.session_id)
     voice_name = request.voice or OPENAI_REALTIME_VOICE
-    instructions = _build_voice_instructions(request.session_id, session, request.agent_name)
+    persona = (request.persona or session.get("coach_persona") or "ruthless").lower()
+    instructions = _build_voice_instructions(request.session_id, session, request.agent_name, persona)
 
     payload: Dict[str, Any] = {
         "model": OPENAI_REALTIME_MODEL,
@@ -1037,6 +1065,7 @@ async def start_agent(session_id: str):
             resume_text=session["resume_text"],
             job_description_text=session["job_desc_text"],
             session_id=session_id,
+            persona=session.get("coach_persona", "ruthless"),
         )
 
         # Start the agent

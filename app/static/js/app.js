@@ -93,6 +93,7 @@ const voiceTranscript = document.getElementById('voice-transcript');
 const voiceAudio = document.getElementById('voice-audio');
 const rememberBtn = document.getElementById('remember-snippet');
 const agentNameInput = document.getElementById('agent-name');
+const coachPersonaSelect = document.getElementById('coach-persona');
 
 const voiceStatusClasses = {
     idle: 'text-gray-500',
@@ -452,6 +453,26 @@ if (agentNameInput) {
     });
 }
 
+// Coach persona selector
+if (coachPersonaSelect) {
+    coachPersonaSelect.value = state.coachPersona || 'ruthless';
+    coachPersonaSelect.addEventListener('change', async () => {
+        const val = (coachPersonaSelect.value || '').trim().toLowerCase();
+        state.coachPersona = ['ruthless', 'helpful', 'discovery'].includes(val) ? val : 'ruthless';
+        try { localStorage.setItem('coachPersona', state.coachPersona); } catch (e) {}
+        if (state.sessionId) {
+            try {
+                await fetch(`/session/${state.sessionId}/coach`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ persona: state.coachPersona })
+                });
+            } catch (e) { /* ignore */ }
+        }
+        appendVoiceMessage('system', `Coach persona set to ${state.coachPersona}.`);
+    });
+}
+
 async function startVoiceInterview() {
     if (!state.sessionId) {
         alert('Upload your documents to start a practice session before enabling voice coaching.');
@@ -476,7 +497,8 @@ async function startVoiceInterview() {
             },
             body: JSON.stringify({
                 session_id: state.sessionId,
-                agent_name: state.agentName || 'Coach'
+                agent_name: state.agentName || 'Coach',
+                persona: state.coachPersona || 'ruthless'
             })
         });
 
@@ -1068,6 +1090,9 @@ async function resumeSavedSession(sessionIdOverride = null) {
         state.questions = data.questions || [];
         state.answers = data.answers || [];
         state.evaluations = data.evaluations || [];
+        // Sync coach persona from server or localStorage fallback
+        state.coachPersona = (data.coach_persona || localStorage.getItem('coachPersona') || 'ruthless');
+        if (coachPersonaSelect) coachPersonaSelect.value = state.coachPersona;
         localStorage.setItem('interviewSessionId', state.sessionId);
 
         const persistedIndex = typeof data.current_question_index === 'number'
