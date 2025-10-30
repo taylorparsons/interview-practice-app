@@ -1,0 +1,1 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="0" skipped="0" tests="1" time="1.412" timestamp="2025-10-15T15:48:09.771188-07:00" hostname="taylors-MacBook-Air-2.local"><testcase classname="tests.ui.test_homepage_smoke" name="test_homepage_upload_section_visible" time="1.403" /></testsuite></testsuites>

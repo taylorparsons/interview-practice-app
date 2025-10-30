@@ -12,6 +12,8 @@ cd "$PROJECT_ROOT"
 
 PYVER="3.11"
 RELOAD=1
+PORT="8000"
+HOST="0.0.0.0"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --no-reload)
@@ -20,6 +22,12 @@ while [[ $# -gt 0 ]]; do
       ;;
     --python)
       PYVER="$2"; shift 2
+      ;;
+    --port)
+      PORT="$2"; shift 2
+      ;;
+    --host)
+      HOST="$2"; shift 2
       ;;
     *)
       echo "Unknown option: $1" >&2; exit 1;
@@ -62,8 +70,6 @@ Create one if you need AI features:
 EOF
 fi
 
-HOST="0.0.0.0"
-PORT="8000"
 RELOAD_FLAG="--reload"
 [[ "$RELOAD" -eq 0 ]] && RELOAD_FLAG=""
 

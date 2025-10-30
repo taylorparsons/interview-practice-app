@@ -237,5 +237,85 @@ curl -X POST http://localhost:8000/work-history/import-path \
 ### How recall is used in voice coaching
 When creating a realtime voice session, the server fetches the top 5 snippets using the first interview question as the query and injects them under “Work History Knowledge Pool” in the system instructions sent to the voice agent.
 
+If embeddings/FAISS are unavailable, the app falls back to a local lexical TF‑IDF store at `app/knowledge_store/work_history.json` with the same API shape.
+
 ### Migration from earlier lexical store
 If you previously used the JSON-backed lexical store at `app/knowledge_store/work_history.json`, the server will automatically migrate those chunks into the FAISS index on first use.
+
+## Coach Personas
+
+Pick a coaching style for both text and voice flows:
+
+- Ruthless Coach: strict, high‑bar, precision‑focused evaluator.
+- Helpful Coach: constructive and encouraging with actionable tips.
+- Discovery Coach: elicits STAR+I narratives from work history to build story inventory.
+
+How to switch:
+- UI: use the “Coach persona” selector in the Voice Interview Coach panel.
+- API: `PATCH /session/{id}/coach` with `{ "persona": "ruthless" | "helpful" | "discovery" }`
+
+Prompts are editable on disk (no code changes). For each persona, files live under:
+- `app/prompts/<persona>/questions_system.txt` and `questions_user.txt`
+- `app/prompts/<persona>/evaluation_system.txt` and `evaluation_user.txt`
+- `app/prompts/<persona>/example_system.txt` and `example_user.txt`
+
+Supported placeholders in user templates:
+- Questions: `{resume_text}`, `{job_description_text}`, `{num_questions}`
+- Evaluation: `{question}`, `{answer}`, `{voice_transcript_block}`
+- Example: `{question}`, `{resume_text}`, `{job_description_text}`
+
+Changes take effect on the next request (with `uvicorn --reload`).
+
+## Remember Snippets (Build Your Knowledge Pool)
+
+Save parts of your spoken answer into the work‑history store for later recall.
+
+- UI button: “Remember” next to voice controls saves the current question’s transcript (summarized with STAR+I).
+- Voice keyword: say “remember that/this/it/the last part” to trigger the same action; the agent will acknowledge.
+- API: `POST /session/{session_id}/voice-transcript/memorize`
+  - Body: `{ "question_index": 0, "summarize": true, "metadata": {"topic": "leadership"} }`
+  - Or: `{ "text": "raw transcript...", "summarize": false }`
+
+Verify and debug:
+- `GET /work-history` and `GET /work-history/search?q=...&k=5`
+- Logs in `logs/app.log`: `knowledge.memorize.start/end`, `knowledge.search.start/end`, `knowledge.import.*`
+
+## Prompt Flow
+
+```mermaid
+flowchart TD
+    A[Upload Resume + Job Description] --> B{Select Coach Persona}
+    B --> C[Generate Questions]
+    C -->|system: app/prompts/<persona>/questions_system.txt\nuser: app/prompts/<persona>/questions_user.txt| D[Questions Shown]
+    D --> E[Answer Question]
+    E -->|typed or voice - transcript saved per question| F[Evaluate Answer]
+    F -->|system: app/prompts/<persona>/evaluation_system.txt\nuser: app/prompts/<persona>/evaluation_user.txt| G[Feedback JSON + UI]
+    D --> H[See Example Answer]
+    H -->|system: app/prompts/<persona>/example_system.txt\nuser: app/prompts/<persona>/example_user.txt| I[Example Answer Text]
+    E --> J{"Remember" Button\n or Voice Keyword}
+    J --> K[(Work History Store)]
+    K --> L[Start Voice Session]
+    L --> N[Build Realtime Instructions]
+    N --> M[Realtime Coach]
+
+    classDef usr fill:#f2ffe6,stroke:#7cc37f,stroke-width:1px;
+    classDef sys fill:#e6f0ff,stroke:#6e90ff,stroke-width:1px;
+    classDef ui fill:#fff5e6,stroke:#ffb347,stroke-width:1px;
+    classDef store fill:#fbe6ff,stroke:#c77dff,stroke-width:1px;
+    classDef decision fill:#ffeac2,stroke:#e0a64f,stroke-width:1px;
+    classDef agent fill:#ffe6f2,stroke:#ff6ea9,stroke-width:1px;
+
+    class A,E,H,J,L usr;
+    class C,F,G,N sys;
+    class D,I ui;
+    class K store;
+    class B decision;
+    class M agent;
+```
+
+Notes
+- `<persona>` is one of `ruthless | helpful | discovery`.
+- If a prompt file is missing, the app falls back to built‑in defaults.
+- The voice session does not use the above per‑task files; it composes a single instruction string from the selected persona plus the top matches from your work‑history store.
+- Realtime instructions combine the persona prompt and retrieved work-history snippets before reaching the realtime coach.
+- Colors indicate interaction type: green for user actions, blue for system processing, amber for UI display, violet for stored data, gold for decision points, and pink for the realtime agent.
