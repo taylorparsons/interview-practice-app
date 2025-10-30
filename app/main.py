@@ -3,6 +3,7 @@ import os
 import asyncio
 import textwrap
 import uuid
+from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Depends, BackgroundTasks
@@ -13,6 +14,7 @@ from pydantic import BaseModel
 from starlette.requests import Request
 import httpx
 import uvicorn
+from openai import AsyncOpenAI
 
 # Import local modules
 from app.config import (
@@ -20,12 +22,14 @@ from app.config import (
     OPENAI_REALTIME_VOICE, OPENAI_REALTIME_URL,
     OPENAI_TURN_DETECTION, OPENAI_TURN_THRESHOLD, OPENAI_TURN_PREFIX_MS, OPENAI_TURN_SILENCE_MS,
     UPLOAD_FOLDER, ALLOWED_EXTENSIONS,
+    KNOWLEDGE_STORE_DIR, WORK_HISTORY_STORE_FILE,
 )
 from app.utils.document_processor import allowed_file, save_uploaded_file, save_text_as_file, process_documents
 from app.models.interview_agent import InterviewPracticeAgent, get_base_coach_prompt
 from app.logging_config import setup_logging
 from app.logging_context import session_id_var
 from app.middleware.request_logging import RequestLoggingMiddleware
+from app.utils.embedding_store import get_work_history_store
 from app.utils.session_store import (
     save_session as persist_session,
     load_session as load_persisted_session,
@@ -213,6 +217,27 @@ class SaveTranscriptRequest(BaseModel):
 class SaveAgentTextRequest(BaseModel):
     question_index: int
     text: str
+
+
+# Work history / knowledge store models
+class WorkHistoryChunk(BaseModel):
+    text: str
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class WorkHistoryAddRequest(BaseModel):
+    chunks: List[WorkHistoryChunk]
+
+
+class WorkHistoryImportPathRequest(BaseModel):
+    path: str
+
+
+class MemorizeTranscriptRequest(BaseModel):
+    question_index: Optional[int] = None
+    text: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+    summarize: bool = False
 
 
 # Routes
@@ -594,6 +619,205 @@ async def save_voice_agent_text(session_id: str, payload: SaveAgentTextRequest):
     return {"ok": True}
 
 
+def _get_work_history_store():
+    try:
+        # Ensure directory exists
+        KNOWLEDGE_STORE_DIR.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        logger.exception("Failed ensuring knowledge store dir")
+    try:
+        return get_work_history_store(WORK_HISTORY_STORE_FILE)
+    except Exception as e:
+        # Fallback to lexical store if FAISS/embeddings unavailable
+        logger.exception("Falling back to lexical store: %s", e)
+        try:
+            from app.utils.vector_store import get_work_history_store as get_lex
+            return get_lex(WORK_HISTORY_STORE_FILE)
+        except Exception:
+            raise
+
+
+@app.get("/work-history")
+async def work_history_stats():
+    """Return stats for the local work-history knowledge store."""
+    store = _get_work_history_store()
+    stats = store.stats()
+    try:
+        logger.info(
+            "knowledge.stats: engine=%s docs=%s dim=%s model=%s",
+            stats.get("engine"), stats.get("docs"), stats.get("dim"), stats.get("model")
+        )
+    except Exception:
+        pass
+    return stats
+
+
+@app.post("/work-history/add")
+async def work_history_add(req: WorkHistoryAddRequest):
+    """Add chunks into the work-history knowledge store."""
+    store = _get_work_history_store()
+    texts = [c.text for c in req.chunks]
+    metas = [(c.metadata or {}) for c in req.chunks]
+    try:
+        added = store.add_texts(texts, metas)
+    except Exception as e:
+        msg = str(e)
+        if "OpenAI client not configured" in msg or "embeddings" in msg.lower():
+            raise HTTPException(status_code=400, detail="Embeddings unavailable. Set OPENAI_API_KEY and OPENAI_EMBEDDING_MODEL.")
+        raise
+    stats = store.stats()
+    try:
+        logger.info("knowledge.add: added=%d total_docs=%s", added, stats.get("docs"))
+    except Exception:
+        pass
+    return {"added": added, "stats": stats}
+
+
+@app.post("/work-history/import-path")
+async def work_history_import_path(req: WorkHistoryImportPathRequest):
+    """Import chunked data from a local file or directory path.
+
+    - Supports .txt/.md (blank-line paragraphs), .jsonl (per-line JSON with 'text'/'content'), and .json (array or {chunks: [...]})
+    """
+    p = (req.path or "").strip()
+    if not p:
+        raise HTTPException(status_code=400, detail="Path must be provided")
+    store = _get_work_history_store()
+    try:
+        try:
+            logger.info("knowledge.import.start: path=%s", p)
+        except Exception:
+            pass
+        added = store.import_path(Path(p))
+        try:
+            logger.info("knowledge.import.end: path=%s added=%d", p, added)
+        except Exception:
+            pass
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Path not found")
+    except Exception as e:
+        logger.exception("work_history.import.error path=%s", p)
+        msg = str(e)
+        if "OpenAI client not configured" in msg or "embeddings" in msg.lower():
+            raise HTTPException(status_code=400, detail="Embeddings unavailable. Set OPENAI_API_KEY and OPENAI_EMBEDDING_MODEL.")
+        raise HTTPException(status_code=500, detail="Failed to import from path")
+    return {"imported": added, "stats": store.stats()}
+
+
+@app.get("/work-history/search")
+async def work_history_search(q: str, k: int = 5):
+    """Search work-history knowledge store for relevant snippets."""
+    store = _get_work_history_store()
+    try:
+        try:
+            logger.info("knowledge.search.api.start: q=%s k=%d", q, k)
+        except Exception:
+            pass
+        results = store.search(q, k=k)
+        try:
+            logger.info("knowledge.search.api.end: q=%s results=%d", q, len(results))
+        except Exception:
+            pass
+    except Exception as e:
+        msg = str(e)
+        if "OpenAI client not configured" in msg or "embeddings" in msg.lower():
+            raise HTTPException(status_code=400, detail="Embeddings unavailable. Set OPENAI_API_KEY and OPENAI_EMBEDDING_MODEL.")
+        raise
+    # Return safe, trimmed payload
+    def trim(t: str, n: int = 400) -> str:
+        t = t or ""
+        return t if len(t) <= n else t[: n - 3] + "..."
+    payload = [
+        {
+            "id": r.get("id"),
+            "score": r.get("score"),
+            "snippet": trim(r.get("text") or ""),
+            "metadata": r.get("metadata") or {},
+        }
+        for r in results
+    ]
+    return {"results": payload}
+
+
+@app.delete("/work-history")
+async def work_history_clear():
+    """Clear the work-history knowledge store."""
+    store = _get_work_history_store()
+    store.clear()
+    try:
+        logger.info("knowledge.clear")
+    except Exception:
+        pass
+    return {"ok": True}
+
+
+@app.post("/session/{session_id}/voice-transcript/memorize")
+async def memorize_voice_transcript(session_id: str, req: MemorizeTranscriptRequest):
+    """Save a voice transcript (raw or summarized) into the work-history store.
+
+    - If `text` is provided, uses it directly.
+    - Else if `question_index` is provided, uses the persisted transcript for that index.
+    - When `summarize` is true, it generates a concise STAR-style snippet before saving.
+    """
+    session = _get_session(session_id)
+    vt_map = session.get("voice_transcripts") or {}
+    qidx = req.question_index
+    text = (req.text or "").strip()
+    if not text:
+        if qidx is None:
+            raise HTTPException(status_code=400, detail="Provide text or question_index")
+        text = (vt_map.get(str(qidx)) or vt_map.get(qidx) or "").strip()
+        if not text:
+            raise HTTPException(status_code=404, detail="No transcript found for that index")
+
+    # Optionally summarize to a compact, reusable snippet
+    snippet = text
+    if req.summarize:
+        try:
+            base = get_base_coach_prompt()
+            system = f"{base}\n\nYou will compress a spoken answer into a crisp STAR+I summary with concrete metrics (80–180 words)."
+            user = f"Question: {(session.get('questions') or [''])[qidx] if (qidx is not None) else ''}\n\nSpoken answer transcript:\n{text}\n\nSummarize succinctly as a reusable accomplishment bullet."
+            client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+            resp = await client.chat.completions.create(
+                model=OPENAI_MODEL,
+                messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+                temperature=0.2,
+            )
+            snippet = (resp.choices[0].message.content or "").strip() or text
+        except Exception:
+            logger.exception("knowledge.memorize.summarize.error: session=%s", session_id)
+            # Fall back to raw transcript
+            snippet = text
+
+    meta = dict(req.metadata or {})
+    meta.update({
+        "session_id": session_id,
+        "question_index": qidx,
+        "question": ((session.get("questions") or [None])[qidx] if (qidx is not None) else None),
+        "source": "voice_memorize",
+        "created_at": datetime.utcnow().isoformat() + "Z",
+    })
+
+    store = _get_work_history_store()
+    try:
+        logger.info("knowledge.memorize.start: session=%s qidx=%s summarize=%s", session_id, qidx, req.summarize)
+    except Exception:
+        pass
+    added = 0
+    try:
+        added = store.add_texts([snippet], [meta])
+    except Exception as e:
+        msg = str(e)
+        if "OpenAI client not configured" in msg or "embeddings" in msg.lower():
+            raise HTTPException(status_code=400, detail="Embeddings unavailable. Set OPENAI_API_KEY and OPENAI_EMBEDDING_MODEL.")
+        raise
+    stats = store.stats()
+    try:
+        logger.info("knowledge.memorize.end: session=%s added=%d total_docs=%s", session_id, added, stats.get("docs"))
+    except Exception:
+        pass
+    return {"added": added, "snippet": snippet, "stats": stats}
+
 @app.delete("/session/{session_id}")
 async def delete_session(session_id: str):
     session = _get_session(session_id)
@@ -657,7 +881,32 @@ def _build_voice_instructions(session_id: str, session: Dict[str, Any]) -> str:
     resume_excerpt = _truncate_text(session.get("resume_text", ""), 1500)
     job_desc_excerpt = _truncate_text(session.get("job_desc_text", ""), 1500)
 
+    # Retrieve top relevant work history snippets from local knowledge store
+    relevant_snippets: List[str] = []
+    try:
+        store = get_work_history_store(WORK_HISTORY_STORE_FILE)
+        # Use the first question as the query; this keeps results targeted
+        query = first_question or "Interview practice"
+        try:
+            logger.info("knowledge.search.start: session=%s query=%s", session_id, query)
+        except Exception:
+            pass
+        results = store.search(query, k=5)
+        try:
+            logger.info("knowledge.search.end: session=%s matches=%d", session_id, len(results))
+        except Exception:
+            pass
+        for r in results:
+            snippet = _truncate_text(r.get("text") or "", 240)
+            if snippet:
+                relevant_snippets.append(f"- {snippet}")
+    except Exception:
+        logger.exception("knowledge.search.error: session=%s", session_id)
+        relevant_snippets = []
+
     base_prompt = get_base_coach_prompt()
+
+    snippets_block = "\n".join(relevant_snippets) if relevant_snippets else "- (No stored work-history snippets found)"
 
     instructions = f"""
 {base_prompt}
@@ -672,12 +921,17 @@ Job description excerpt:
 Interview question plan:
 {question_bullets}
 
+# Work History Knowledge Pool (top matches):
+{snippets_block}
+
 # Realtime Guidance:
 Conduct a conversational mock interview. Start with a brief greeting, then ask the first question exactly as "{first_question}".
 Listen to the candidate's voice response. After they finish, provide concise, constructive feedback and practical tips (under 4 sentences).
 Proceed through the remaining questions naturally. If the candidate asks for clarification or coaching, offer targeted guidance.
 Keep responses under 30 seconds and always send a short text summary alongside audio so the UI can display the feedback.
 Wrap up when the candidate indicates they are done or when the planned questions are covered.
+
+If the candidate says a phrase like "remember that" or "please remember this", briefly acknowledge that it will be saved to their knowledge pool. The app will persist the note; keep your acknowledgement short (e.g., "Got it — I’ll remember that.").
 """
     return textwrap.dedent(instructions).strip()
 

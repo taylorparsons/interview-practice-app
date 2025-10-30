@@ -80,10 +80,18 @@ Update `.env` with your token (and override realtime model/voice if desired).
 The script creates/activates the virtual environment (if missing), installs dependencies, and starts the development server with auto-reload by default. Use `./run_voice.sh` when you want to skip evaluation and jump straight into the realtime coaching flow.
 When the UI loads, upload your resume and either attach a job description file or paste its text directly into the job description field.
 
+4. Install UI testing dependencies (optional, for browser automation)
+```bash
+source venv/bin/activate  # created by ./run.sh
+pip install -r requirements-dev.txt
+```
+When running the UI tests, ensure the server is reachable at `http://localhost:8000` (the default). Override `UI_BASE_URL` before invoking `./run_usertests.sh` if you run on a different port.
+
 ## Helper Scripts
 - `./run.sh`: Boots the FastAPI server. Add `--no-reload` to disable auto-reload or `--python 3.11` to select a Python version.
 - `./run_voice.sh`: Same as `run.sh`, but prints realtime voice config details; handy when testing the WebRTC/audio flow exclusively.
 - `./test.sh`: Runs the test suite with `pytest -q`. Use `--health` to ping the running server (`http://localhost:8000` by default) after tests, or override the health-check target with `--url <base_url>`.
+- `./run_usertests.sh`: Installs Helium/Selenium UI dependencies from `requirements-dev.txt` and runs the browser smoke tests in `tests/ui/`. Set `UI_BASE_URL` if the app is not on `http://localhost:8000`. The script writes a Markdown summary to `tests/ui/__artifacts__/usertests_report.md` plus raw logs in `usertests.pytest.log`.
 
 ## Realtime Voice Interviews
 - Upload your resume and job description to start a session, then click **Start Voice Session** to open a WebRTC call with the `gpt-realtime-mini-2025-10-06` coach.
@@ -168,6 +176,11 @@ Taylor Parsons - taylor.parsons@gmaio.com
 - **When**: The user asks how the app would respond to a question based on the resume.
 - **Outcome**: The app generates a response using relevant information from the resume, demonstrating potential answers.
 
+### 7. UI Smoke Tests (Helium)
+- **Test Scenario**: Verify the landing page renders the document upload form and key controls.
+- **Expected Outcome**: Elements such as Resume/Job Description inputs, job description textarea, and `Start Interview Practice` CTA exist once the page loads.
+- **Run Command**: Ensure the FastAPI server is running on `http://localhost:8000` (default from `./run.sh`), then execute `./run_usertests.sh` (override `UI_BASE_URL` or set `HEADFUL_UI_TESTS=1` for visible browser runs). Review the journey-focused summary at `tests/ui/__artifacts__/usertests_report.md` and screenshots in the per-test flow folders under the same directory.
+
 ---
 
 ## Test Document
@@ -195,3 +208,34 @@ Taylor Parsons - taylor.parsons@gmaio.com
 ### 6. Resume-Based Answering
 - **Test Scenario**: Test the app's ability to answer questions using the user's resume as a factual source.
 - **Expected Outcome**: The app should generate accurate responses based on the resume, demonstrating potential answers to interview questions.
+
+## Work History Knowledge Store (Vector Search)
+
+Add your past projects and accomplishments as a reusable knowledge pool. The voice coach will surface the most relevant snippets during mock interviews.
+
+- Storage: FAISS index at `app/knowledge_store/work_history.faiss` with metadata in `work_history_meta.json` (ignored by git)
+- Engine: OpenAI embeddings (`OPENAI_EMBEDDING_MODEL`, default `text-embedding-3-small`) + FAISS cosine similarity
+
+### API
+- `GET /work-history` — stats for the store
+- `POST /work-history/add` — add chunks
+  - Body: `{ "chunks": [ { "text": "...", "metadata": {"role": "SWE"} }, ... ] }`
+- `POST /work-history/import-path` — import from a local file/dir
+  - Body: `{ "path": "/absolute/or/relative/path" }`
+  - Supports `.txt`/`.md` (blank-line paragraphs), `.jsonl` (per-line object with `text`/`content`), `.json` (array or `{"chunks": [...]}`)
+- `GET /work-history/search?q=...&k=5` — search snippets
+- `DELETE /work-history` — clear the store
+
+### Example: Import a chunked folder
+If your data lives at `/Volumes/T9/Users/taylorparsons/code/interview_app/chunks`:
+```bash
+curl -X POST http://localhost:8000/work-history/import-path \
+  -H 'Content-Type: application/json' \
+  -d '{"path": "/Volumes/T9/Users/taylorparsons/code/interview_app/chunks"}'
+```
+
+### How recall is used in voice coaching
+When creating a realtime voice session, the server fetches the top 5 snippets using the first interview question as the query and injects them under “Work History Knowledge Pool” in the system instructions sent to the voice agent.
+
+### Migration from earlier lexical store
+If you previously used the JSON-backed lexical store at `app/knowledge_store/work_history.json`, the server will automatically migrate those chunks into the FAISS index on first use.

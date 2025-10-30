@@ -42,3 +42,6 @@ app/session_store/
 
 # Uploaded documents
 app/uploads/
+
+# Knowledge store (local vectors)
+app/knowledge_store/

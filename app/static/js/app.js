@@ -90,6 +90,7 @@ const stopVoiceBtn = document.getElementById('stop-voice');
 const voiceStatus = document.getElementById('voice-status');
 const voiceTranscript = document.getElementById('voice-transcript');
 const voiceAudio = document.getElementById('voice-audio');
+const rememberBtn = document.getElementById('remember-snippet');
 
 const voiceStatusClasses = {
     idle: 'text-gray-500',
@@ -104,6 +105,11 @@ function setVoiceControls(active) {
     }
     if (stopVoiceBtn) {
         stopVoiceBtn.classList.toggle('hidden', !active);
+    }
+    if (rememberBtn) {
+        rememberBtn.disabled = !state.sessionId;
+        rememberBtn.classList.toggle('opacity-50', !state.sessionId);
+        rememberBtn.classList.toggle('cursor-not-allowed', !state.sessionId);
     }
 }
 
@@ -346,6 +352,16 @@ function handleVoiceEvent(event) {
                     const existing = state.voice.transcriptsByIndex[idx] || '';
                     state.voice.transcriptsByIndex[idx] = existing ? `${existing}\n${transcriptText}` : transcriptText;
                 }
+
+                // Keyword-triggered memorize: listen for phrases like "remember that" or "remember this"
+                try {
+                    const lower = String(transcriptText).toLowerCase();
+                    if (/(^|\b)(please\s+)?remember\s+(that|this|it|the\s+last\s+part)(\b|\s|[.!?,])/i.test(lower)) {
+                        triggerMemorize({ keyword: true });
+                    }
+                } catch (e) {
+                    // ignore
+                }
             }
             break;
         }
@@ -358,6 +374,68 @@ function handleVoiceEvent(event) {
             }
         }
     }
+}
+
+// Send a brief agent acknowledgement via realtime channel
+function speakAgent(text) {
+    try {
+        if (!state.voice?.dataChannel || state.voice.dataChannel.readyState !== 'open') return;
+        const payload = {
+            type: 'response.create',
+            response: {
+                modalities: ['audio', 'text'],
+                instructions: text,
+            },
+        };
+        state.voice.dataChannel.send(JSON.stringify(payload));
+    } catch (e) {
+        // no-op
+    }
+}
+
+async function triggerMemorize({ keyword = false } = {}) {
+    if (!state.sessionId) {
+        appendVoiceMessage('system', 'Cannot remember: no active session.');
+        return;
+    }
+    const idx = state.currentQuestionIndex;
+    const transcript = state.voice?.transcriptsByIndex?.[idx] || '';
+    if (!transcript) {
+        appendVoiceMessage('system', 'Nothing to remember yet for this question.');
+        return;
+    }
+
+    // Debounce repeat triggers per question
+    const now = Date.now();
+    state.voice._lastMemorize = state.voice._lastMemorize || {};
+    const last = state.voice._lastMemorize[idx] || 0;
+    if (now - last < 6000) {
+        // skip duplicates within 6s
+        return;
+    }
+    state.voice._lastMemorize[idx] = now;
+
+    try {
+        const res = await fetch(`/session/${state.sessionId}/voice-transcript/memorize`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ question_index: idx, summarize: true, metadata: { trigger: keyword ? 'voice_keyword' : 'ui_button' } }),
+        });
+        if (!res.ok) {
+            const errText = await res.text();
+            throw new Error(errText || 'Memorize failed');
+        }
+        const data = await res.json();
+        appendVoiceMessage('system', 'Saved to your knowledge pool.');
+        speakAgent('Got it — I will remember that.');
+    } catch (e) {
+        console.error('Memorize error:', e);
+        appendVoiceMessage('system', 'Sorry, I could not save that just now.');
+    }
+}
+
+if (rememberBtn) {
+    rememberBtn.addEventListener('click', () => triggerMemorize({ keyword: false }));
 }
 
 async function startVoiceInterview() {
