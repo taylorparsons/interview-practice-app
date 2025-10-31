@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 def _read_legacy_lexical_json(path: Path) -> Tuple[List[str], List[Dict[str, Any]]]:
+    """Load legacy lexical store data for migration into FAISS."""
     try:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
         docs = data.get("docs") or []
@@ -27,6 +28,7 @@ def _read_legacy_lexical_json(path: Path) -> Tuple[List[str], List[Dict[str, Any
 
 @dataclass
 class FaissDoc:
+    """Lightweight representation of a stored FAISS document."""
     id: str
     text: str
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -39,6 +41,7 @@ class FaissVectorStore:
     """
 
     def __init__(self, index_path: Path, meta_path: Path, embedding_model: str, api_key: str, legacy_json: Optional[Path] = None):
+        """Initialise the FAISS-backed store with persistence and embedding config."""
         self.index_path = Path(index_path)
         self.meta_path = Path(meta_path)
         self.embedding_model = embedding_model
@@ -57,6 +60,7 @@ class FaissVectorStore:
 
     # ---------- Internal: persistence ----------
     def _load_or_init(self, legacy_json: Optional[Path]) -> None:
+        """Load an existing FAISS index or bootstrap an empty store."""
         import faiss  # type: ignore
 
         if self.index_path.exists() and self.meta_path.exists():
@@ -87,6 +91,7 @@ class FaissVectorStore:
         # Otherwise, remain empty until first add
 
     def _save(self) -> None:
+        """Persist the FAISS index and metadata to disk."""
         import faiss  # type: ignore
 
         self.index_path.parent.mkdir(parents=True, exist_ok=True)
@@ -104,6 +109,7 @@ class FaissVectorStore:
 
     # ---------- Embeddings helpers ----------
     def _embed(self, texts: List[str]) -> np.ndarray:
+        """Compute normalised embeddings for the supplied text batch."""
         if not self.client:
             raise RuntimeError("OpenAI client not configured for embeddings")
         # OpenAI Embeddings API call
@@ -118,6 +124,7 @@ class FaissVectorStore:
         return arr
 
     def _ensure_index(self) -> None:
+        """Create the FAISS index if it has not yet been initialised."""
         import faiss  # type: ignore
 
         if self._index is None:
@@ -126,6 +133,7 @@ class FaissVectorStore:
 
     # ---------- Public API ----------
     def clear(self) -> None:
+        """Remove all documents and reset the FAISS index."""
         import faiss  # type: ignore
 
         self.docs = []
@@ -135,6 +143,7 @@ class FaissVectorStore:
         self._save()
 
     def add_texts(self, texts: Iterable[str], metadatas: Optional[Iterable[Dict[str, Any]]] = None) -> int:
+        """Add text chunks plus metadata to the index, returning the count stored."""
         texts = list(texts)
         if not texts:
             return 0
@@ -157,6 +166,7 @@ class FaissVectorStore:
         return added
 
     def search(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
+        """Retrieve the top-k matching documents for a query string."""
         if not self.docs or self._index is None:
             return []
         q = (query or "").strip()
@@ -181,6 +191,7 @@ class FaissVectorStore:
 
     # Import chunked content from filesystem
     def import_path(self, path: Path) -> int:
+        """Import supported file types from a directory or file into the store."""
         path = Path(path)
         if not path.exists():
             raise FileNotFoundError(str(path))
@@ -254,6 +265,7 @@ class FaissVectorStore:
         return total
 
     def stats(self) -> Dict[str, Any]:
+        """Return diagnostic information about the current FAISS store."""
         return {
             "engine": self.meta.get("engine", "faiss"),
             "docs": self.count,
@@ -265,6 +277,7 @@ class FaissVectorStore:
 
 
 def get_work_history_store(legacy_json_path: Path) -> FaissVectorStore:
+    """Factory that returns a FAISS store rooted beside the legacy JSON file."""
     base = Path(legacy_json_path).parent
     stem = Path(legacy_json_path).stem
     index_path = base / f"{stem}.faiss"

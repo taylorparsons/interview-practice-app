@@ -57,7 +57,10 @@ def setup_logging() -> None:
 
     # Simple JSON formatter using standard logging
     class JsonFormatter(logging.Formatter):
+        """Render log records as compact JSON objects."""
+
         def format(self, record: logging.LogRecord) -> str:  # noqa: D401
+            """Return the JSON-formatted string for a log record."""
             base = {
                 "time": datetime.utcnow().isoformat() + "Z",
                 "level": record.levelname,
@@ -71,7 +74,26 @@ def setup_logging() -> None:
                 base[attr] = getattr(record, attr, None)
             if record.exc_info:
                 base["exc_info"] = self.formatException(record.exc_info)
+            for key, value in record.__dict__.items():
+                if key.startswith("ctx_"):
+                    base[key[4:]] = value
             return json.dumps(base, ensure_ascii=False)
+
+    class HumanFormatter(logging.Formatter):
+        """Render log records in a human-readable single line format."""
+
+        def format(self, record: logging.LogRecord) -> str:  # noqa: D401
+            """Return the formatted string for a human-readable log record."""
+            context_parts = []
+            for key, value in record.__dict__.items():
+                if key.startswith("ctx_") and value not in (None, "", []):
+                    context_parts.append(f"{key[4:]}={value}")
+            record.context_suffix = f" | {' '.join(context_parts)}" if context_parts else ""
+            if getattr(record, "request_id", None) is None:
+                record.request_id = "-"
+            if getattr(record, "session_id", None) is None:
+                record.session_id = "-"
+            return super().format(record)
 
     dictConfig(
         {
@@ -80,8 +102,8 @@ def setup_logging() -> None:
             "formatters": {
                 "standard": (
                     {
-                        "format": "%(asctime)s | %(levelname)s | %(name)s | rid=%(request_id)s sid=%(session_id)s | %(message)s",
-                        "class": "logging.Formatter",
+                        "format": "%(asctime)s | %(levelname)s | %(message)s%(context_suffix)s | req=%(request_id)s sess=%(session_id)s | %(name)s",
+                        "()": HumanFormatter,
                     }
                     if not is_json
                     else {"()": JsonFormatter}

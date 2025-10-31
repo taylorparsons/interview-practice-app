@@ -18,6 +18,7 @@ def _simple_tokenize(text: str) -> List[str]:
 
 @dataclass
 class LexicalDoc:
+    """Stored lexical chunk with precomputed TF-IDF weights."""
     id: str
     text: str
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -34,6 +35,7 @@ class LexicalVectorStore:
     """
 
     def __init__(self, path: Path):
+        """Initialise the lexical store backed by the provided JSON file."""
         self.path = Path(path)
         self.docs: List[LexicalDoc] = []
         # Global stats
@@ -52,6 +54,7 @@ class LexicalVectorStore:
 
     # ---------- Persistence ----------
     def _load(self) -> None:
+        """Load persisted store metadata and documents from disk."""
         data = json.loads(self.path.read_text(encoding="utf-8"))
         self.meta = data.get("meta", {})
         self.doc_count = data.get("doc_count", 0)
@@ -69,6 +72,7 @@ class LexicalVectorStore:
             )
 
     def _save(self) -> None:
+        """Write the current store state to disk."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "meta": self.meta,
@@ -89,6 +93,7 @@ class LexicalVectorStore:
 
     # ---------- Core ops ----------
     def clear(self) -> None:
+        """Remove all stored documents and reset counters."""
         self.docs = []
         self.df = {}
         self.doc_count = 0
@@ -146,6 +151,7 @@ class LexicalVectorStore:
         return count
 
     def _cosine_sim(self, qv: Dict[str, float], qnorm: float, dv: Dict[str, float], dnorm: float) -> float:
+        """Compute cosine similarity between query and document vectors."""
         if qnorm == 0.0 or dnorm == 0.0:
             return 0.0
         # Sparse dot product
@@ -157,6 +163,7 @@ class LexicalVectorStore:
         return dot / (qnorm * dnorm)
 
     def _tfidf_query(self, query: str) -> Tuple[Dict[str, float], float]:
+        """Build a TF-IDF representation for the query string."""
         import math
 
         term_counts: Dict[str, int] = {}
@@ -200,6 +207,7 @@ class LexicalVectorStore:
 
     # ---------- Import helpers ----------
     def import_path(self, path: Path) -> int:
+        """Import supported file formats from the given path into the store."""
         """Import chunks from a directory or file.
 
         Supported:
@@ -278,6 +286,7 @@ class LexicalVectorStore:
         return total
 
     def stats(self) -> Dict[str, Any]:
+        """Return summary statistics describing the lexical store."""
         return {
             "engine": self.meta.get("engine", "lexical"),
             "docs": self.doc_count,
@@ -287,5 +296,5 @@ class LexicalVectorStore:
 
 
 def get_work_history_store(path: Path) -> LexicalVectorStore:
+    """Instantiate a lexical store that reads/writes to the supplied path."""
     return LexicalVectorStore(path)
-

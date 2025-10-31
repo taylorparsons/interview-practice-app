@@ -34,12 +34,33 @@ from app.utils.session_store import (
     save_session as persist_session,
     load_session as load_persisted_session,
     delete_session as delete_persisted_session,
-    list_sessions as list_persisted_sessions,
     rename_session as rename_persisted_session,
+    list_sessions as list_persisted_sessions,
 )
 
 setup_logging()
 logger = logging.getLogger(__name__)
+
+
+def log_event(slug: str, *, level: str = "info", session_id: Optional[str] = None, **fields: Any) -> None:
+    """Emit a structured log with a verb-noun slug and optional context."""
+    extra = {"session_id": session_id}
+    for key, value in fields.items():
+        if value is None:
+            continue
+        extra[f"ctx_{key}"] = value
+    log_fn = getattr(logger, level, logger.info)
+    log_fn(slug, extra=extra)
+
+
+def _coach_display_name(persona: Optional[str]) -> Optional[str]:
+    """Return the human-friendly label for a coach persona slug."""
+    mapping = {
+        "ruthless": "Ruthless Coach",
+        "helpful": "Helpful Coach",
+        "discovery": "Discovery Coach",
+    }
+    return mapping.get((persona or "").lower() or "", None)
 
 # Initialize FastAPI
 app = FastAPI(title="Interview Practice App")
@@ -55,6 +76,46 @@ templates = Jinja2Templates(directory="app/templates")
 
 # Store active interview sessions
 active_sessions = {}
+
+
+def _allowed_import_roots() -> List[Path]:
+    """Return allowed root directories for work-history imports."""
+    roots = {
+        Path(UPLOAD_FOLDER).resolve(),
+        KNOWLEDGE_STORE_DIR.resolve(),
+    }
+    extra = os.getenv("WORK_HISTORY_IMPORT_ALLOWED_ROOTS")
+    if extra:
+        for raw in extra.split(os.pathsep):
+            raw = raw.strip()
+            if not raw:
+                continue
+            try:
+                roots.add(Path(raw).expanduser().resolve())
+            except Exception:
+                log_event(
+                    "knowledge.import.allowlist_invalid",
+                    level="warning",
+                    entry=raw,
+                )
+    return list(roots)
+
+
+def _resolve_import_path(path_str: str) -> Path:
+    """Validate that the requested import path lives under an allowed root."""
+    candidate = Path(path_str).expanduser().resolve()
+    for root in _allowed_import_roots():
+        try:
+            candidate.relative_to(root)
+            return candidate
+        except ValueError:
+            continue
+    log_event(
+        "knowledge.import.disallowed_path",
+        level="warning",
+        path=str(candidate),
+    )
+    raise HTTPException(status_code=403, detail="Import path not permitted")
 
 
 def _get_session(session_id: str) -> Dict[str, Any]:
@@ -79,22 +140,26 @@ def _persist_session_state(session_id: str, session: Dict[str, Any]) -> None:
 
 async def _ensure_agent_ready(session_id: str, session: Dict[str, Any], *, force_restart: bool = False) -> Dict[str, Any]:
     """Ensure an agent is ready for the session, optionally forcing a restart."""
+    try:
+        session_id_var.set(session_id)
+    except Exception:
+        pass
     if force_restart and session.get("agent") is not None:
-        logger.info("agent.ensure.reset: session=%s", session_id)
+        log_event("agent.ensure.reset", session_id=session_id)
         session["agent"] = None
         _persist_session_state(session_id, session)
 
     if session.get("agent") is None:
-        logger.info("agent.ensure.start: session=%s", session_id)
+        log_event("agent.ensure.start", session_id=session_id)
         try:
             await start_agent(session_id)
         except Exception:
-            logger.exception("agent.ensure.error: session=%s", session_id)
+            log_event("agent.ensure.error", level="exception", session_id=session_id)
         session = _get_session(session_id)
         if session.get("agent") is None:
-            logger.warning("agent.ensure.unavailable: session=%s", session_id)
+            log_event("agent.ensure.unavailable", level="warning", session_id=session_id)
         else:
-            logger.info("agent.ensure.ready: session=%s", session_id)
+            log_event("agent.ensure.ready", session_id=session_id)
 
     return session
 
@@ -140,6 +205,7 @@ def _derive_session_name(job_desc_text: str) -> str:
     company = company or "company"
 
     def slugify(s: str) -> str:
+        """Normalize free-form text into a filesystem-safe slug."""
         s = s.lower()
         s = re.sub(r"[^a-z0-9]+", "_", s).strip("_")
         return s or "item"
@@ -149,21 +215,25 @@ def _derive_session_name(job_desc_text: str) -> str:
 
 # Request and response models
 class DocumentUploadResponse(BaseModel):
+    """Response payload returned after successful resume/job description upload."""
     session_id: str
     message: str
     name: Optional[str] = None
 
 
 class GenerateQuestionsRequest(BaseModel):
+    """Request body for generating interview questions."""
     session_id: str
     num_questions: int = 5
 
 
 class GenerateQuestionsResponse(BaseModel):
+    """Model encapsulating generated interview questions."""
     questions: List[str]
 
 
 class EvaluateAnswerRequest(BaseModel):
+    """Request payload for evaluating a candidate answer."""
     session_id: str
     question: str
     answer: str
@@ -171,19 +241,23 @@ class EvaluateAnswerRequest(BaseModel):
 
 
 class EvaluateAnswerResponse(BaseModel):
+    """Model describing the structured evaluation from the coach."""
     evaluation: Dict[str, Any]
 
 
 class ExampleAnswerRequest(BaseModel):
+    """Request envelope asking for an example answer to a question."""
     session_id: str
     question: str
 
 
 class ExampleAnswerResponse(BaseModel):
+    """Response model containing a sample answer from the coach."""
     answer: str
 
 
 class VoiceSessionRequest(BaseModel):
+    """Parameters required to create a realtime voice coaching session."""
     session_id: str
     voice: Optional[str] = None
     agent_name: Optional[str] = None
@@ -191,6 +265,7 @@ class VoiceSessionRequest(BaseModel):
 
 
 class VoiceSessionResponse(BaseModel):
+    """Details returned from the realtime voice session provisioning API."""
     id: str
     model: str
     client_secret: str
@@ -199,6 +274,7 @@ class VoiceSessionResponse(BaseModel):
 
 
 class SessionListItem(BaseModel):
+    """Summary metadata describing a saved interview session."""
     id: str
     name: str
     created_at: Optional[str] = None
@@ -208,34 +284,41 @@ class SessionListItem(BaseModel):
 
 
 class RenameSessionRequest(BaseModel):
+    """Request body for renaming an existing session."""
     name: str
 
 
 class SaveTranscriptRequest(BaseModel):
+    """Body payload for persisting a voice transcript snippet."""
     question_index: int
     text: str
 
 
 class SaveAgentTextRequest(BaseModel):
+    """Payload for storing the coach's spoken feedback text."""
     question_index: int
     text: str
 
 
 # Work history / knowledge store models
 class WorkHistoryChunk(BaseModel):
+    """Single chunk of text plus optional metadata destined for the knowledge store."""
     text: str
     metadata: Optional[Dict[str, Any]] = None
 
 
 class WorkHistoryAddRequest(BaseModel):
+    """Request wrapper for adding multiple knowledge store chunks at once."""
     chunks: List[WorkHistoryChunk]
 
 
 class WorkHistoryImportPathRequest(BaseModel):
+    """Request describing a filesystem path whose contents should be ingested."""
     path: str
 
 
 class MemorizeTranscriptRequest(BaseModel):
+    """Request body for storing a transcript or its summary in the knowledge store."""
     question_index: Optional[int] = None
     text: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
@@ -243,6 +326,7 @@ class MemorizeTranscriptRequest(BaseModel):
 
 
 class SetCoachPersonaRequest(BaseModel):
+    """Request model for updating the active coach persona of a session."""
     persona: str
 
 
@@ -277,10 +361,21 @@ async def upload_documents(
     
     # Create session ID
     session_id = str(uuid.uuid4())
-    
+    try:
+        session_id_var.set(session_id)
+    except Exception:
+        pass
+    log_event(
+        "session.create.start",
+        session_id=session_id,
+        resume_filename=resume.filename,
+        job_filename=job_description.filename if job_description is not None else None,
+        job_text_chars=len(job_description_text or ""),
+    )
+
     # Create uploads directory if it doesn't exist
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-    
+
     # Save uploaded files or text
     resume_path = save_uploaded_file(resume, UPLOAD_FOLDER, session_id + "_resume")
     if job_description is not None:
@@ -310,11 +405,19 @@ async def upload_documents(
     }
 
     _persist_session_state(session_id, session_data)
-    
+    log_event(
+        "session.create.persisted",
+        session_id=session_id,
+        name=default_name,
+        resume_chars=len(resume_text or ""),
+        job_chars=len(job_desc_text or ""),
+    )
+
     # Initialize and start the agent in the background
     if background_tasks:
         background_tasks.add_task(start_agent, session_id)
-    
+        log_event("agent.start.enqueued", session_id=session_id)
+
     return {"session_id": session_id, "message": "Documents uploaded successfully", "name": default_name}
 
 
@@ -322,6 +425,16 @@ async def upload_documents(
 async def generate_questions(request: GenerateQuestionsRequest):
     session_id = request.session_id
     session = _get_session(session_id)
+    try:
+        session_id_var.set(session_id)
+    except Exception:
+        pass
+    log_event(
+        "questions.generate.start",
+        session_id=session_id,
+        requested=request.num_questions,
+        agent_present=bool(session.get("agent")),
+    )
 
     if session.get("agent") is not None:
         try:
@@ -331,10 +444,15 @@ async def generate_questions(request: GenerateQuestionsRequest):
             session["questions"] = questions
             session["current_question_index"] = 0
             _persist_session_state(session_id, session)
+            log_event(
+                "questions.generate.agent",
+                session_id=session_id,
+                count=len(questions),
+            )
 
             return {"questions": questions}
         except Exception:
-            logger.exception("Error using agent to generate questions for session %s", session_id)
+            log_event("questions.generate.error", level="exception", session_id=session_id)
 
     job_desc = session["job_desc_text"] if "job_desc_text" in session else ""
     
@@ -363,6 +481,11 @@ async def generate_questions(request: GenerateQuestionsRequest):
     session["questions"] = questions
     session["current_question_index"] = 0
     _persist_session_state(session_id, session)
+    log_event(
+        "questions.generate.fallback",
+        session_id=session_id,
+        count=len(questions),
+    )
 
     return {"questions": questions[:request.num_questions]}
 
@@ -394,14 +517,14 @@ async def evaluate_answer(request: EvaluateAnswerRequest):
                 transcripts = session.get("voice_transcripts", {})
                 transcript_text = transcripts.get(str(idx)) or transcripts.get(idx) or ""
 
-            logger.info(
-                "evaluation.agent path: session=%s attempt=%s idx=%s q_len=%s a_len=%s t_present=%s",
-                session_id,
-                attempt + 1,
-                idx,
-                len(request.question or ""),
-                len(request.answer or ""),
-                bool(transcript_text and transcript_text.strip()),
+            log_event(
+                "evaluation.agent",
+                session_id=session_id,
+                attempt=attempt + 1,
+                question_index=idx,
+                question_chars=len(request.question or ""),
+                answer_chars=len(request.answer or ""),
+                transcript_present=bool(transcript_text and transcript_text.strip()),
             )
             evaluation = await agent.evaluate_answer(request.question, request.answer, transcript_text)
 
@@ -426,21 +549,30 @@ async def evaluate_answer(request: EvaluateAnswerRequest):
 
             session["current_question_index"] = len(session["answers"])
             _persist_session_state(session_id, session)
+            log_event(
+                "evaluation.persisted",
+                session_id=session_id,
+                total_answers=len(session["answers"]),
+                total_evaluations=len(session["evaluations"]),
+            )
 
             return {"evaluation": evaluation}
         except Exception:
-            logger.exception(
-                "evaluation.agent error: session=%s attempt=%s", session_id, attempt + 1
+            log_event(
+                "evaluation.agent.error",
+                level="exception",
+                session_id=session_id,
+                attempt=attempt + 1,
             )
             # Drop the agent so a subsequent attempt can reinitialize
             session["agent"] = None
             _persist_session_state(session_id, session)
     
-    logger.info(
-        "evaluation.fallback path: session=%s q_len=%s a_len=%s",
-        session_id,
-        len(request.question or ""),
-        len(request.answer or ""),
+    log_event(
+        "evaluation.fallback",
+        session_id=session_id,
+        question_chars=len(request.question or ""),
+        answer_chars=len(request.answer or ""),
     )
     answer_length = len(request.answer)
     
@@ -536,6 +668,11 @@ async def generate_example_answer(request: ExampleAnswerRequest):
         session_id_var.set(session_id)
     except Exception:
         pass
+    log_event(
+        "example.request",
+        session_id=session_id,
+        question_chars=len(request.question or ""),
+    )
 
     for attempt in range(2):
         session = await _ensure_agent_ready(session_id, session, force_restart=attempt > 0)
@@ -544,15 +681,24 @@ async def generate_example_answer(request: ExampleAnswerRequest):
             continue
         try:
             example_answer = await agent.generate_example_answer(request.question)
-            logger.info("example.agent path: session=%s attempt=%s", session_id, attempt + 1)
+            log_event(
+                "example.agent",
+                session_id=session_id,
+                attempt=attempt + 1,
+            )
             return {"answer": example_answer}
         except Exception:
-            logger.exception("example.agent error: session=%s attempt=%s", session_id, attempt + 1)
+            log_event(
+                "example.agent.error",
+                level="exception",
+                session_id=session_id,
+                attempt=attempt + 1,
+            )
             session["agent"] = None
             _persist_session_state(session_id, session)
-    
+
     question = request.question.lower()
-    logger.info("example.fallback path: session=%s", session_id)
+    log_event("example.fallback", session_id=session_id)
     
     if "experience" in question or "background" in question:
         answer = """I have over 5 years of experience in software development with a focus on full-stack web applications. My background includes working at both startups and established companies where I've contributed to all stages of the software development lifecycle. In my most recent role at TechCorp, I led the development of a customer-facing portal that increased customer engagement by 35% and reduced support tickets by 20%. Prior to that, I worked at InnovateX where I built RESTful APIs that improved system performance by 40%. My technical expertise includes JavaScript/TypeScript, React, Node.js, Python, and SQL databases."""
@@ -595,14 +741,42 @@ async def get_session_status(session_id: str):
 
 @app.get("/session/{session_id}/documents")
 async def get_session_documents(session_id: str):
-    """Return raw resume and job description texts for a session."""
+    """Return stored resume and job description content with basic stats."""
     session = _get_session(session_id)
-    return {
+    try:
+        session_id_var.set(session_id)
+    except Exception:
+        pass
+    resume_text = (session.get("resume_text") or "").strip()
+    job_desc_text = (session.get("job_desc_text") or "").strip()
+
+    def _payload(text: str) -> Dict[str, Any]:
+        """Build a consistent payload describing stored document details."""
+        preview_limit = 4000
+        preview = text if len(text) <= preview_limit else text[: preview_limit - 3].rstrip() + "..."
+        return {
+            "present": bool(text),
+            "characters": len(text),
+            "words": len(text.split()),
+            "text": text,
+            "preview": preview,
+        }
+
+    payload = {
         "session_id": session_id,
         "name": session.get("name"),
-        "resume_text": session.get("resume_text", ""),
-        "job_desc_text": session.get("job_desc_text", ""),
+        "resume": _payload(resume_text),
+        "job_description": _payload(job_desc_text),
     }
+    log_event(
+        "documents.fetch",
+        session_id=session_id,
+        resume_chars=len(resume_text),
+        job_chars=len(job_desc_text),
+        resume_present=bool(resume_text),
+        job_present=bool(job_desc_text),
+    )
+    return payload
 
 
 @app.post("/session/{session_id}/voice-transcript")
@@ -613,6 +787,12 @@ async def save_voice_transcript(session_id: str, payload: SaveTranscriptRequest)
     vt[str(payload.question_index)] = payload.text or ""
     session["voice_transcripts"] = vt
     _persist_session_state(session_id, session)
+    log_event(
+        "voice.transcript.save",
+        session_id=session_id,
+        question_index=payload.question_index,
+        characters=len(payload.text or ""),
+    )
     return {"ok": True}
 
 
@@ -624,20 +804,31 @@ async def save_voice_agent_text(session_id: str, payload: SaveAgentTextRequest):
     vat[str(payload.question_index)] = payload.text or ""
     session["voice_agent_text"] = vat
     _persist_session_state(session_id, session)
+    preview = (payload.text or "").strip()
+    if len(preview) > 160:
+        preview = f"{preview[:157].rstrip()}..."
+    log_event(
+        "voice.coach.save",
+        session_id=session_id,
+        question_index=payload.question_index,
+        characters=len(payload.text or ""),
+        preview=preview or None,
+    )
     return {"ok": True}
 
 
 def _get_work_history_store():
+    """Resolve the preferred knowledge store implementation for the session."""
     try:
         # Ensure directory exists
         KNOWLEDGE_STORE_DIR.mkdir(parents=True, exist_ok=True)
     except Exception:
-        logger.exception("Failed ensuring knowledge store dir")
+        log_event("knowledge.store.ensure_error", level="exception")
     try:
         return get_work_history_store(WORK_HISTORY_STORE_FILE)
     except Exception as e:
         # Fallback to lexical store if FAISS/embeddings unavailable
-        logger.exception("Falling back to lexical store: %s", e)
+        log_event("knowledge.store.fallback", level="exception", error=str(e))
         try:
             from app.utils.vector_store import get_work_history_store as get_lex
             return get_lex(WORK_HISTORY_STORE_FILE)
@@ -650,13 +841,13 @@ async def work_history_stats():
     """Return stats for the local work-history knowledge store."""
     store = _get_work_history_store()
     stats = store.stats()
-    try:
-        logger.info(
-            "knowledge.stats: engine=%s docs=%s dim=%s model=%s",
-            stats.get("engine"), stats.get("docs"), stats.get("dim"), stats.get("model")
-        )
-    except Exception:
-        pass
+    log_event(
+        "knowledge.stats",
+        engine=stats.get("engine"),
+        docs=stats.get("docs"),
+        dim=stats.get("dim"),
+        model=stats.get("model"),
+    )
     return stats
 
 
@@ -674,10 +865,7 @@ async def work_history_add(req: WorkHistoryAddRequest):
             raise HTTPException(status_code=400, detail="Embeddings unavailable. Set OPENAI_API_KEY and OPENAI_EMBEDDING_MODEL.")
         raise
     stats = store.stats()
-    try:
-        logger.info("knowledge.add: added=%d total_docs=%s", added, stats.get("docs"))
-    except Exception:
-        pass
+    log_event("knowledge.add", added=added, total_docs=stats.get("docs"))
     return {"added": added, "stats": stats}
 
 
@@ -690,21 +878,24 @@ async def work_history_import_path(req: WorkHistoryImportPathRequest):
     p = (req.path or "").strip()
     if not p:
         raise HTTPException(status_code=400, detail="Path must be provided")
+    sanitized_path: Path
+    try:
+        sanitized_path = _resolve_import_path(p)
+    except HTTPException:
+        raise
+    except Exception:
+        log_event("knowledge.import.resolve_error", level="exception", path=p)
+        raise HTTPException(status_code=400, detail="Invalid path")
+
     store = _get_work_history_store()
     try:
-        try:
-            logger.info("knowledge.import.start: path=%s", p)
-        except Exception:
-            pass
-        added = store.import_path(Path(p))
-        try:
-            logger.info("knowledge.import.end: path=%s added=%d", p, added)
-        except Exception:
-            pass
+        log_event("knowledge.import.start", path=str(sanitized_path))
+        added = store.import_path(sanitized_path)
+        log_event("knowledge.import.end", path=str(sanitized_path), added=added)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Path not found")
     except Exception as e:
-        logger.exception("work_history.import.error path=%s", p)
+        log_event("knowledge.import.error", level="exception", path=str(sanitized_path))
         msg = str(e)
         if "OpenAI client not configured" in msg or "embeddings" in msg.lower():
             raise HTTPException(status_code=400, detail="Embeddings unavailable. Set OPENAI_API_KEY and OPENAI_EMBEDDING_MODEL.")
@@ -717,15 +908,9 @@ async def work_history_search(q: str, k: int = 5):
     """Search work-history knowledge store for relevant snippets."""
     store = _get_work_history_store()
     try:
-        try:
-            logger.info("knowledge.search.api.start: q=%s k=%d", q, k)
-        except Exception:
-            pass
+        log_event("knowledge.search.api.start", query=q, k=k)
         results = store.search(q, k=k)
-        try:
-            logger.info("knowledge.search.api.end: q=%s results=%d", q, len(results))
-        except Exception:
-            pass
+        log_event("knowledge.search.api.end", query=q, results=len(results))
     except Exception as e:
         msg = str(e)
         if "OpenAI client not configured" in msg or "embeddings" in msg.lower():
@@ -733,6 +918,7 @@ async def work_history_search(q: str, k: int = 5):
         raise
     # Return safe, trimmed payload
     def trim(t: str, n: int = 400) -> str:
+        """Trim snippets to a safe preview length for the API response."""
         t = t or ""
         return t if len(t) <= n else t[: n - 3] + "..."
     payload = [
@@ -752,10 +938,7 @@ async def work_history_clear():
     """Clear the work-history knowledge store."""
     store = _get_work_history_store()
     store.clear()
-    try:
-        logger.info("knowledge.clear")
-    except Exception:
-        pass
+    log_event("knowledge.clear")
     return {"ok": True}
 
 
@@ -793,7 +976,7 @@ async def memorize_voice_transcript(session_id: str, req: MemorizeTranscriptRequ
             )
             snippet = (resp.choices[0].message.content or "").strip() or text
         except Exception:
-            logger.exception("knowledge.memorize.summarize.error: session=%s", session_id)
+            log_event("knowledge.memorize.summarize.error", level="exception", session_id=session_id)
             # Fall back to raw transcript
             snippet = text
 
@@ -807,10 +990,12 @@ async def memorize_voice_transcript(session_id: str, req: MemorizeTranscriptRequ
     })
 
     store = _get_work_history_store()
-    try:
-        logger.info("knowledge.memorize.start: session=%s qidx=%s summarize=%s", session_id, qidx, req.summarize)
-    except Exception:
-        pass
+    log_event(
+        "knowledge.memorize.start",
+        session_id=session_id,
+        question_index=qidx,
+        summarize=req.summarize,
+    )
     added = 0
     try:
         added = store.add_texts([snippet], [meta])
@@ -820,33 +1005,37 @@ async def memorize_voice_transcript(session_id: str, req: MemorizeTranscriptRequ
             raise HTTPException(status_code=400, detail="Embeddings unavailable. Set OPENAI_API_KEY and OPENAI_EMBEDDING_MODEL.")
         raise
     stats = store.stats()
-    try:
-        logger.info("knowledge.memorize.end: session=%s added=%d total_docs=%s", session_id, added, stats.get("docs"))
-    except Exception:
-        pass
+    log_event(
+        "knowledge.memorize.end",
+        session_id=session_id,
+        added=added,
+        total_docs=stats.get("docs"),
+    )
     return {"added": added, "snippet": snippet, "stats": stats}
 
 @app.delete("/session/{session_id}")
 async def delete_session(session_id: str):
     session = _get_session(session_id)
+    log_event("session.delete.request", session_id=session_id)
 
     try:
         os.remove(session["resume_path"])
         os.remove(session["job_desc_path"])
     except Exception:
-        logger.exception("Error cleaning up files for session %s", session_id)
+        log_event("session.delete.cleanup_error", level="exception", session_id=session_id)
     
     active_sessions.pop(session_id, None)
     delete_persisted_session(session_id)
+    log_event("session.delete.success", session_id=session_id)
     
     return {"message": "Session deleted successfully"}
 
 
 @app.get("/sessions", response_model=List[SessionListItem])
 async def list_sessions():
-    """List all saved sessions with basic metadata."""
     items = list_persisted_sessions()
-    return [SessionListItem(**item) for item in items]
+    log_event("session.list", count=len(items))
+    return items
 
 
 @app.patch("/session/{session_id}/name")
@@ -859,6 +1048,7 @@ async def rename_session(session_id: str, request: RenameSessionRequest):
 
     session["name"] = new_name
     _persist_session_state(session_id, session)
+    log_event("session.rename", session_id=session_id, name=new_name)
 
     updated = rename_persisted_session(session_id, new_name)
     if updated is None:
@@ -871,19 +1061,45 @@ async def rename_session(session_id: str, request: RenameSessionRequest):
 async def set_coach_persona(session_id: str, request: SetCoachPersonaRequest):
     """Set the coach persona for a session: ruthless | helpful | discovery."""
     session = _get_session(session_id)
-    persona = (request.persona or "").strip().lower()
-    if persona not in {"ruthless", "helpful", "discovery"}:
+    requested_persona = (request.persona or "").strip().lower()
+    current_persona = (session.get("coach_persona") or "ruthless").lower()
+    current_display = _coach_display_name(current_persona)
+    if requested_persona not in {"ruthless", "helpful", "discovery"}:
+        log_event(
+            "persona.update.invalid",
+            level="warning",
+            session_id=session_id,
+            persona=requested_persona or None,
+            previous_persona=current_persona,
+            coach=current_display,
+        )
         raise HTTPException(status_code=400, detail="Invalid persona. Use ruthless, helpful, or discovery.")
-    session["coach_persona"] = persona
+    previous_persona = session.get("coach_persona", "ruthless")
+    if requested_persona == current_persona:
+        log_event(
+            "persona.update.noop",
+            session_id=session_id,
+            persona=requested_persona,
+            coach=current_display,
+        )
+        return {"session_id": session_id, "coach_persona": requested_persona}
+    session["coach_persona"] = requested_persona
     _persist_session_state(session_id, session)
+    log_event(
+        "persona.update",
+        session_id=session_id,
+        persona=requested_persona,
+        previous_persona=previous_persona,
+        coach=_coach_display_name(requested_persona),
+    )
     # If an agent exists, update it in-place
     try:
         agent = session.get("agent")
         if agent is not None:
-            agent.persona = persona
+            agent.persona = requested_persona
     except Exception:
         pass
-    return {"session_id": session_id, "coach_persona": persona}
+    return {"session_id": session_id, "coach_persona": requested_persona}
 
 
 def _truncate_text(text: str, limit: int = 1200) -> str:
@@ -911,24 +1127,26 @@ def _build_voice_instructions(session_id: str, session: Dict[str, Any], agent_na
     # Retrieve top relevant work history snippets from local knowledge store
     relevant_snippets: List[str] = []
     try:
-        store = get_work_history_store(WORK_HISTORY_STORE_FILE)
+        store = _get_work_history_store()
         # Use the first question as the query; this keeps results targeted
         query = first_question or "Interview practice"
-        try:
-            logger.info("knowledge.search.start: session=%s query=%s", session_id, query)
-        except Exception:
-            pass
+        log_event(
+            "knowledge.search.start",
+            session_id=session_id,
+            query=query,
+        )
         results = store.search(query, k=5)
-        try:
-            logger.info("knowledge.search.end: session=%s matches=%d", session_id, len(results))
-        except Exception:
-            pass
+        log_event(
+            "knowledge.search.end",
+            session_id=session_id,
+            matches=len(results),
+        )
         for r in results:
             snippet = _truncate_text(r.get("text") or "", 240)
             if snippet:
                 relevant_snippets.append(f"- {snippet}")
     except Exception:
-        logger.exception("knowledge.search.error: session=%s", session_id)
+        log_event("knowledge.search.error", level="exception", session_id=session_id)
         relevant_snippets = []
 
     from app.models.interview_agent import get_coach_prompt
@@ -975,6 +1193,18 @@ async def create_voice_session(request: VoiceSessionRequest):
     voice_name = request.voice or OPENAI_REALTIME_VOICE
     persona = (request.persona or session.get("coach_persona") or "ruthless").lower()
     instructions = _build_voice_instructions(request.session_id, session, request.agent_name, persona)
+    try:
+        session_id_var.set(request.session_id)
+    except Exception:
+        pass
+    log_event(
+        "voice.session.create.start",
+        session_id=request.session_id,
+        persona=persona,
+        voice=voice_name,
+        agent_name=request.agent_name or session.get("agent_name"),
+        coach=_coach_display_name(persona),
+    )
 
     payload: Dict[str, Any] = {
         "model": OPENAI_REALTIME_MODEL,
@@ -1000,7 +1230,11 @@ async def create_voice_session(request: VoiceSessionRequest):
             }
     except Exception:
         # If parsing fails, fall back silently without turn_detection overrides
-        logger.exception("Invalid VAD configuration; proceeding with service defaults")
+        log_event(
+            "voice.session.vad_error",
+            level="exception",
+            session_id=request.session_id,
+        )
 
     try:
         async with httpx.AsyncClient(timeout=10) as client:
@@ -1016,21 +1250,40 @@ async def create_voice_session(request: VoiceSessionRequest):
             response.raise_for_status()
     except httpx.HTTPStatusError as exc:
         detail = "Unable to start realtime voice session"
-        logger.exception(
-            "Realtime session creation failed with status %s: %s",
-            exc.response.status_code,
-            exc.response.text,
+        log_event(
+            "voice.session.create.error",
+            level="exception",
+            session_id=request.session_id,
+            status=exc.response.status_code,
         )
         raise HTTPException(status_code=exc.response.status_code, detail=detail)
     except httpx.HTTPError:
-        logger.exception("Error contacting OpenAI realtime API")
+        log_event(
+            "voice.session.create.transport_error",
+            level="exception",
+            session_id=request.session_id,
+        )
         raise HTTPException(status_code=502, detail="Realtime voice service unavailable")
 
     data = response.json()
     client_secret = data.get("client_secret", {}).get("value")
     if not client_secret:
-        logger.error("Realtime session response missing client secret: %s", data)
+        log_event(
+            "voice.session.create.missing_secret",
+            level="error",
+            session_id=request.session_id,
+        )
         raise HTTPException(status_code=500, detail="Realtime voice session unavailable")
+
+    log_event(
+        "voice.session.create.success",
+        session_id=request.session_id,
+        voice=voice_name,
+        model=data.get("model", OPENAI_REALTIME_MODEL),
+        agent_name=request.agent_name or session.get("agent_name"),
+        persona=persona,
+        coach=_coach_display_name(persona),
+    )
 
     return VoiceSessionResponse(
         id=data.get("id", ""),
@@ -1044,17 +1297,21 @@ async def create_voice_session(request: VoiceSessionRequest):
 # Helper functions
 async def start_agent(session_id: str):
     """Start the interview agent for a session."""
+    try:
+        session_id_var.set(session_id)
+    except Exception:
+        pass
     session = active_sessions.get(session_id)
     if session is None:
         stored = load_persisted_session(session_id)
         if stored is None:
-            logger.warning("Session %s not found while starting agent", session_id)
+            log_event("agent.start.missing_session", level="warning", session_id=session_id)
             return
         session = stored
         active_sessions[session_id] = session
 
     if session.get("agent") is not None:
-        logger.debug("Agent already active for session %s", session_id)
+        log_event("agent.start.cached", level="debug", session_id=session_id)
         return
 
     try:
@@ -1075,14 +1332,21 @@ async def start_agent(session_id: str):
         session["agent"] = agent
         _persist_session_state(session_id, session)
 
-        logger.info("Agent started for session %s", session_id)
+        log_event("agent.start.success", session_id=session_id)
     except Exception:
-        logger.exception("Error starting agent for session %s", session_id)
+        log_event("agent.start.error", level="exception", session_id=session_id)
 
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
-    logger.error("Unhandled exception for %s %s", request.method, request.url.path, exc_info=exc)
+    logger.error(
+        "app.unhandled_error",
+        extra={
+            "method": request.method,
+            "path": request.url.path,
+        },
+        exc_info=exc,
+    )
     return JSONResponse(
         status_code=500,
         content={"detail": "Internal server error"},

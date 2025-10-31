@@ -12,6 +12,7 @@ class ContextFilter(logging.Filter):
     """Injects contextvars (request_id, session_id) into every log record."""
 
     def filter(self, record: logging.LogRecord) -> bool:  # noqa: D401
+        """Attach contextual identifiers to the log record before emission."""
         rid = request_id_var.get()
         sid = session_id_var.get()
         if not hasattr(record, "request_id"):
@@ -33,6 +34,7 @@ class RedactFilter(logging.Filter):
     )
 
     def filter(self, record: logging.LogRecord) -> bool:  # noqa: D401
+        """Redact known secret patterns from the log record."""
         try:
             msg = record.msg
             args = record.args

@@ -7,10 +7,12 @@ SESSION_DIR = Path(__file__).resolve().parent.parent / "session_store"
 
 
 def _ensure_dir() -> None:
+    """Create the session storage directory when it is missing."""
     SESSION_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _session_path(session_id: str) -> Path:
+    """Return the filesystem path for a session JSON blob."""
     return SESSION_DIR / f"{session_id}.json"
 
 

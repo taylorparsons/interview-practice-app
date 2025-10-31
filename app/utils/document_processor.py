@@ -3,14 +3,16 @@ import uuid
 import docx
 import PyPDF2
 from pathlib import Path
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, Optional, Set
 import io
 
-def allowed_file(filename: str, allowed_extensions: set = None) -> bool:
+from app.config import ALLOWED_EXTENSIONS
+
+
+def allowed_file(filename: str, allowed_extensions: Optional[Set[str]] = None) -> bool:
     """Check if the file extension is allowed."""
-    if allowed_extensions is None:
-        allowed_extensions = {'pdf', 'docx', 'txt'}
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in allowed_extensions
+    extensions = allowed_extensions or ALLOWED_EXTENSIONS
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in extensions
 
 def save_uploaded_file(file, upload_folder: str, file_type: str) -> str:
     """Save uploaded file and return the saved path."""
