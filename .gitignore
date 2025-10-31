@@ -35,6 +35,8 @@ logs/
 
 # OpenAI and sensitive config
 .openai_config
+# Project config module (safe defaults, no secrets)
+!app/config.py
 config.py
 
 # Persisted sessions
