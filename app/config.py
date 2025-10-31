@@ -19,6 +19,7 @@ load_dotenv(BASE_DIR / ".env")
 
 
 def _resolve_upload_dir(value: str | None) -> str:
+    """Return the absolute uploads directory from env or default path."""
     if not value:
         return str(BASE_DIR / "app" / "uploads")
     expanded = os.path.expanduser(value)
@@ -26,6 +27,7 @@ def _resolve_upload_dir(value: str | None) -> str:
 
 
 def _parse_extensions(value: str | None, default: Set[str]) -> Set[str]:
+    """Parse a comma-separated list of extensions into a normalized set."""
     if not value:
         return default
     items = {item.strip().lower() for item in value.split(",") if item.strip()}
@@ -53,7 +55,7 @@ OPENAI_INPUT_TRANSCRIPTION_MODEL = os.getenv("OPENAI_INPUT_TRANSCRIPTION_MODEL",
 
 # Uploads and file handling
 UPLOAD_FOLDER = _resolve_upload_dir(os.getenv("UPLOAD_FOLDER"))
-ALLOWED_EXTENSIONS = _parse_extensions(os.getenv("ALLOWED_EXTENSIONS"), {"pdf", "docx", "txt"})
+ALLOWED_EXTENSIONS = _parse_extensions(os.getenv("ALLOWED_EXTENSIONS"), {"pdf", "doc", "docx", "txt"})
 
 # Knowledge store locations
 KNOWLEDGE_STORE_DIR = (BASE_DIR / "app" / "knowledge_store").resolve()
@@ -78,4 +80,3 @@ __all__ = [
     "KNOWLEDGE_STORE_DIR",
     "WORK_HISTORY_STORE_FILE",
 ]
-

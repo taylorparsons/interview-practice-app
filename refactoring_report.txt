@@ -50,3 +50,6 @@ FILE: app/utils/vector_store.py
 🟡 Line 255: Deeply nested conditional (depth 6). Consider extracting to separate functions or using early returns.
 🟡 Line 267: Deeply nested conditional (depth 5). Consider extracting to separate functions or using early returns.
 🟡 Line 269: Deeply nested conditional (depth 4). Consider extracting to separate functions or using early returns.
+
+
+Report saved to: refactoring_report.txt
