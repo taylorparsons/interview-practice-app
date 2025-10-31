@@ -3,5 +3,4 @@ Interview Question: {question}
 Candidate's Answer: {answer}
 
 {voice_transcript_block}
-Please evaluate this response.
-
+Evaluate this response with ruthless precision. Produce the strict JSON object defined by the system prompt (score, strengths, weaknesses, feedback, why_asked, example_improvement). Call out any unsupported claims, missing metrics, or weak ownership. If a voice transcript is provided, include delivery critiques relevant to credibility.

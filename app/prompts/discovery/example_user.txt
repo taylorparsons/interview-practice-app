@@ -6,5 +6,4 @@ Resume:
 Job Description:
 {job_description_text}
 
-Provide a concise STAR+I narrative answer.
-
+Provide a concise STAR + I narrative answer that pulls authentic details from the resume, mirrors the job description priorities, includes concrete metrics, and closes with reflection or lessons learned. Keep it within ~110–190 words and output only the answer text.

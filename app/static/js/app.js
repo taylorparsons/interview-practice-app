@@ -11,6 +11,12 @@ function createInitialVoiceState() {
         transcriptsByIndex: {},
         messages: [],
         streamingMessage: null,
+        userTranscriptBuffer: '',
+        userStreamingMessage: null,
+        lastUserTranscriptSource: null,
+        lastUserTranscriptAt: 0,
+        lastRealtimeUserTranscriptAt: 0,
+        lastBrowserUserTranscriptAt: 0,
     };
 }
 
@@ -19,6 +25,7 @@ function createInitialState() {
         sessionId: null,
         sessionName: null,
         agentName: (typeof localStorage !== 'undefined' && localStorage.getItem('agentName')) || 'Coach',
+        coachPersona: (typeof localStorage !== 'undefined' && localStorage.getItem('coachPersona')) || 'discovery',
         questions: [],
         currentQuestionIndex: 0,
         answers: [],
@@ -102,6 +109,152 @@ const voiceStatusClasses = {
     error: 'text-red-600'
 };
 
+const SAVED_SESSIONS_KEY = 'interviewSavedSessions';
+const SESSION_SYNC_TTL_MS = 30_000;
+let remoteSessionsCache = [];
+let remoteSessionsFetchedAt = 0;
+let remoteSessionsPromise = null;
+
+function logUiEvent(eventSlug, details = {}) {
+    if (typeof console === 'undefined' || typeof console.debug !== 'function') {
+        return;
+    }
+    const base = {
+        event: `ui.${eventSlug}`,
+        sessionId: state.sessionId || null,
+    };
+    if (Number.isInteger(state.currentQuestionIndex)) {
+        base.questionIndex = state.currentQuestionIndex;
+    }
+    console.debug(`[ui] ${eventSlug}`, { ...base, ...details });
+}
+
+function invalidateRemoteSessionsCache() {
+    remoteSessionsCache = [];
+    remoteSessionsFetchedAt = 0;
+}
+
+async function fetchRemoteSessions(force = false) {
+    const now = Date.now();
+    if (!force && remoteSessionsCache.length && (now - remoteSessionsFetchedAt) < SESSION_SYNC_TTL_MS) {
+        return remoteSessionsCache;
+    }
+    if (remoteSessionsPromise) {
+        return remoteSessionsPromise;
+    }
+    remoteSessionsPromise = (async () => {
+        try {
+            const res = await fetch('/sessions');
+            if (!res.ok) {
+                throw new Error(`Failed to fetch sessions (${res.status})`);
+            }
+            const payload = await res.json();
+            const rows = Array.isArray(payload) ? payload : [];
+            remoteSessionsCache = rows.map((row) => ({
+                id: row.id,
+                name: row.name || `Session ${String(row.id).slice(0, 8)}`,
+                updated_at: row.updated_at || row.created_at || new Date().toISOString(),
+            }));
+            remoteSessionsFetchedAt = Date.now();
+            logUiEvent('session.list.sync', { count: remoteSessionsCache.length });
+            return remoteSessionsCache;
+        } catch (error) {
+            logUiEvent('session.list.sync_error', { message: error.message });
+            throw error;
+        } finally {
+            remoteSessionsPromise = null;
+        }
+    })();
+    return remoteSessionsPromise;
+}
+
+async function syncSavedSessions({ force = false } = {}) {
+    try {
+        const items = await fetchRemoteSessions(force);
+        if (Array.isArray(items) && items.length) {
+            items.forEach((item) => upsertSavedSession(item));
+        }
+        return items;
+    } catch (error) {
+        return [];
+    }
+}
+
+function loadSavedSessions() {
+    if (typeof localStorage === 'undefined') {
+        return [];
+    }
+    try {
+        const raw = localStorage.getItem(SAVED_SESSIONS_KEY);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch (err) {
+        console.warn('Unable to parse saved sessions from storage', err);
+        return [];
+    }
+}
+
+function fallbackSavedSessionFromLocalId() {
+    if (typeof localStorage === 'undefined') {
+        return null;
+    }
+    try {
+        const last = localStorage.getItem('interviewSessionId');
+        if (!last) {
+            return null;
+        }
+        const name = localStorage.getItem('interviewSessionName');
+        return {
+            id: last,
+            name: (name && name.trim()) || `Session ${String(last).slice(0, 8)}`,
+            updated_at: new Date().toISOString(),
+        };
+    } catch (err) {
+        return null;
+    }
+}
+
+function saveSavedSessions(items) {
+    if (typeof localStorage === 'undefined') {
+        return;
+    }
+    localStorage.setItem(SAVED_SESSIONS_KEY, JSON.stringify(items || []));
+}
+
+function upsertSavedSession(meta = {}) {
+    if (!meta || !meta.id) {
+        return;
+    }
+    const sessions = loadSavedSessions();
+    const idx = sessions.findIndex((s) => s.id === meta.id);
+    const entry = {
+        id: meta.id,
+        name: meta.name || `Session ${String(meta.id).slice(0, 8)}`,
+        updated_at: meta.updated_at || new Date().toISOString(),
+    };
+    if (idx >= 0) {
+        sessions[idx] = { ...sessions[idx], ...entry };
+    } else {
+        sessions.push(entry);
+    }
+    saveSavedSessions(sessions);
+}
+
+function removeSavedSession(id) {
+    if (!id) {
+        return;
+    }
+    const sessions = loadSavedSessions();
+    const next = sessions.filter((s) => s.id !== id);
+    saveSavedSessions(next);
+}
+
+function getSavedSession(id) {
+    if (!id) return null;
+    return loadSavedSessions().find((s) => s.id === id) || null;
+}
+
 function setVoiceControls(active) {
     if (startVoiceBtn) {
         startVoiceBtn.classList.toggle('hidden', active);
@@ -143,6 +296,12 @@ function clearVoiceTranscript() {
         state.voice.streamingMessage = null;
         state.voice.transcriptsByIndex = {};
         state.voice.messages = [];
+        state.voice.userTranscriptBuffer = '';
+        state.voice.userStreamingMessage = null;
+        state.voice.lastUserTranscriptSource = null;
+        state.voice.lastUserTranscriptAt = 0;
+        state.voice.lastRealtimeUserTranscriptAt = 0;
+        state.voice.lastBrowserUserTranscriptAt = 0;
     }
     voiceTranscript.dataset.empty = 'true';
     voiceTranscript.innerHTML = '<p class="text-xs text-gray-500">Voice transcripts will appear here once the realtime session begins.</p>';
@@ -272,6 +431,212 @@ function finalizeAgentMessage() {
     state.voice.transcriptBuffer = '';
 }
 
+function normalizeTranscriptPayload(payload) {
+    if (!payload) {
+        return '';
+    }
+    if (typeof payload === 'string') {
+        return payload;
+    }
+    if (typeof payload.transcript === 'string') {
+        return payload.transcript;
+    }
+    if (typeof payload.text === 'string') {
+        return payload.text;
+    }
+    if (typeof payload.delta === 'string') {
+        return payload.delta;
+    }
+    if (payload.delta && typeof payload.delta.transcript === 'string') {
+        return payload.delta.transcript;
+    }
+    if (payload.delta && typeof payload.delta.text === 'string') {
+        return payload.delta.text;
+    }
+    if (Array.isArray(payload.results) && payload.results.length > 0) {
+        const primary = payload.results[0];
+        if (primary && typeof primary.transcript === 'string') {
+            return primary.transcript;
+        }
+        if (primary && Array.isArray(primary.alternatives) && primary.alternatives.length > 0) {
+            const alt = primary.alternatives[0];
+            if (alt && typeof alt.transcript === 'string') {
+                return alt.transcript;
+            }
+        }
+    }
+    const item = payload.item || payload;
+    if (item && item.input_audio && item.input_audio.transcription) {
+        const tx = item.input_audio.transcription;
+        if (typeof tx === 'string') {
+            return tx;
+        }
+        if (typeof tx.transcript === 'string') {
+            return tx.transcript;
+        }
+        if (typeof tx.text === 'string') {
+            return tx.text;
+        }
+    }
+    const content = item && Array.isArray(item.content) ? item.content : [];
+    for (const part of content) {
+        if (!part) continue;
+        if (typeof part.transcript === 'string' && part.transcript.trim()) {
+            return part.transcript;
+        }
+        if (typeof part.text === 'string' && part.text.trim()) {
+            return part.text;
+        }
+        if (part.input_audio && typeof part.input_audio.transcript === 'string') {
+            return part.input_audio.transcript;
+        }
+        if (part.input_audio && part.input_audio.transcription) {
+            const tx = part.input_audio.transcription;
+            if (typeof tx === 'string') {
+                return tx;
+            }
+            if (typeof tx.transcript === 'string') {
+                return tx.transcript;
+            }
+            if (typeof tx.text === 'string') {
+                return tx.text;
+            }
+        }
+    }
+    return '';
+}
+
+function appendUserTranscriptSegment(text, options = {}) {
+    const { done = false, source = 'realtime', confidence } = options;
+    const voiceState = state.voice;
+    if (!voiceState) {
+        return;
+    }
+
+    const rawText = typeof text === 'string' ? text : '';
+    const cleanText = rawText.trim();
+    const hasContent = cleanText.length > 0;
+
+    if (!voiceState.userStreamingMessage && !hasContent) {
+        return;
+    }
+
+    const now = Date.now();
+    voiceState.lastUserTranscriptSource = source;
+    voiceState.lastUserTranscriptAt = now;
+    if (source === 'realtime') {
+        voiceState.lastRealtimeUserTranscriptAt = now;
+    } else if (source === 'browser_asr') {
+        voiceState.lastBrowserUserTranscriptAt = now;
+    }
+
+    if (!voiceState.userStreamingMessage && hasContent) {
+        const lastIndex = Array.isArray(voiceState.messages) ? voiceState.messages.length - 1 : -1;
+        if (
+            lastIndex >= 0 &&
+            voiceState.messages[lastIndex] &&
+            voiceState.messages[lastIndex].role === 'user' &&
+            !voiceState.messages[lastIndex].stream &&
+            voiceTranscript &&
+            voiceTranscript.lastElementChild
+        ) {
+            const existingBubble = voiceTranscript.lastElementChild.querySelector('p');
+            if (existingBubble) {
+                voiceState.userStreamingMessage = {
+                    element: existingBubble,
+                    entryIndex: lastIndex,
+                    text: voiceState.messages[lastIndex].text || '',
+                    source: voiceState.messages[lastIndex].source || source,
+                };
+            }
+        }
+    }
+
+    if (!voiceState.userStreamingMessage && hasContent) {
+        const result = appendVoiceMessage('user', cleanText, { stream: !done });
+        if (result) {
+            const contentEl = result.wrapper.querySelector('p');
+            voiceState.userStreamingMessage = {
+                element: contentEl,
+                entryIndex: result.entryIndex,
+                text: cleanText,
+                source,
+            };
+            if (voiceState.messages[result.entryIndex]) {
+                voiceState.messages[result.entryIndex].source = source;
+                if (typeof confidence === 'number') {
+                    voiceState.messages[result.entryIndex].confidence = confidence;
+                }
+            }
+        }
+    }
+
+    const stream = voiceState.userStreamingMessage;
+    if (!stream) {
+        return;
+    }
+
+    let activeSource = typeof stream.source === 'string' ? stream.source : null;
+    if (!activeSource) {
+        stream.source = source;
+        activeSource = source;
+    }
+
+    if (activeSource === 'browser_asr' && source === 'realtime' && !done) {
+        return;
+    }
+
+    if (!stream.text) {
+        stream.text = cleanText;
+    } else if (source === 'browser_asr') {
+        stream.text = cleanText || stream.text;
+    } else if (done && cleanText) {
+        stream.text = cleanText;
+    } else if (!done && cleanText) {
+        stream.text = `${stream.text} ${cleanText}`.trim();
+    } else if (done && !cleanText && stream.text) {
+        stream.text = stream.text.trim();
+    }
+
+    stream.source = source;
+
+    if (stream.element) {
+        stream.element.textContent = stream.text;
+    }
+    if (voiceState.messages[stream.entryIndex]) {
+        voiceState.messages[stream.entryIndex].text = stream.text;
+        voiceState.messages[stream.entryIndex].stream = !done;
+        voiceState.messages[stream.entryIndex].source = stream.source || source;
+        if (typeof confidence === 'number') {
+            voiceState.messages[stream.entryIndex].confidence = confidence;
+        }
+    }
+
+    const idx = state.currentQuestionIndex;
+    if (Number.isInteger(idx)) {
+        voiceState.userTranscriptBuffer = stream.text;
+        if (done) {
+            voiceState.transcriptsByIndex[idx] = stream.text;
+        }
+    }
+
+    if (done) {
+        voiceState.userStreamingMessage = null;
+        const buffer = stream.text;
+        if (buffer) {
+            try {
+                const lower = buffer.toLowerCase();
+                if (/(^|\b)(please\s+)?remember\s+(that|this|it|the\s+last\s+part)(\b|\s|[.!?,])/i.test(lower)) {
+                    triggerMemorize({ keyword: true });
+                }
+            } catch (_) {
+                // ignore keyword errors
+            }
+        }
+        voiceState.userTranscriptBuffer = '';
+    }
+}
+
 function handleVoiceEvent(event) {
     if (!event || !event.type) {
         return;
@@ -344,28 +709,69 @@ function handleVoiceEvent(event) {
             state.voice.transcriptBuffer = '';
             break;
         }
-        case 'conversation.item.input_audio_transcription.completed':
-        case 'input_audio_buffer.speech_transcribed': {
-            const transcriptText = event.transcript || event.text || '';
-            if (transcriptText) {
-                appendVoiceMessage('user', transcriptText);
-                // Capture transcript text for the current question index
-                const idx = state.currentQuestionIndex;
-                if (Number.isInteger(idx)) {
-                    const existing = state.voice.transcriptsByIndex[idx] || '';
-                    state.voice.transcriptsByIndex[idx] = existing ? `${existing}\n${transcriptText}` : transcriptText;
-                }
-
-                // Keyword-triggered memorize: listen for phrases like "remember that" or "remember this"
-                try {
-                    const lower = String(transcriptText).toLowerCase();
-                    if (/(^|\b)(please\s+)?remember\s+(that|this|it|the\s+last\s+part)(\b|\s|[.!?,])/i.test(lower)) {
-                        triggerMemorize({ keyword: true });
-                    }
-                } catch (e) {
-                    // ignore
+        case 'conversation.item.created': {
+            const role = event.item?.role || event.role;
+            if (role === 'user') {
+                const text = normalizeTranscriptPayload(event);
+                if (text) {
+                    console.debug('[voice] user item created', text);
+                    appendUserTranscriptSegment(text, { done: true, source: 'realtime' });
+                } else {
+                    console.debug('[voice] user item created without transcript', event);
                 }
             }
+            break;
+        }
+        case 'conversation.item.completed': {
+            const role = event.item?.role || event.role;
+            if (role === 'user') {
+                const text = normalizeTranscriptPayload(event);
+                if (text) {
+                    console.debug('[voice] user item completed', text);
+                    appendUserTranscriptSegment(text, { done: true, source: 'realtime' });
+                } else {
+                    console.debug('[voice] user item completed missing transcript', event);
+                }
+            }
+            break;
+        }
+        case 'conversation.item.input_audio_transcription.delta':
+        case 'input_audio_buffer.transcription.delta': {
+            const text = normalizeTranscriptPayload(event);
+            if (text) {
+                console.debug('[voice] user transcript delta', { type: event.type, text });
+            } else {
+                console.debug('[voice] user transcript delta missing text', event);
+            }
+            appendUserTranscriptSegment(text, { done: false, source: 'realtime' });
+            break;
+        }
+        case 'conversation.item.input_audio_transcription.completed':
+        case 'input_audio_buffer.speech_transcribed':
+        case 'input_audio_buffer.transcription.completed': {
+            const text = normalizeTranscriptPayload(event);
+            if (text) {
+                console.debug('[voice] user transcript completed', { type: event.type, text });
+            } else {
+                console.debug('[voice] user transcript completed missing text', event);
+            }
+            appendUserTranscriptSegment(text, { done: true, source: 'realtime' });
+            break;
+        }
+        case 'response.input_text.delta': {
+            const text = normalizeTranscriptPayload(event);
+            if (text) {
+                console.debug('[voice] input text delta', text);
+            }
+            appendUserTranscriptSegment(text, { done: false, source: 'realtime' });
+            break;
+        }
+        case 'response.input_text.done': {
+            const text = normalizeTranscriptPayload(event);
+            if (text) {
+                console.debug('[voice] input text done', text);
+            }
+            appendUserTranscriptSegment(text, { done: true, source: 'realtime' });
             break;
         }
         default: {
@@ -455,21 +861,47 @@ if (agentNameInput) {
 
 // Coach persona selector
 if (coachPersonaSelect) {
-    coachPersonaSelect.value = state.coachPersona || 'ruthless';
+    coachPersonaSelect.value = state.coachPersona || 'discovery';
     coachPersonaSelect.addEventListener('change', async () => {
-        const val = (coachPersonaSelect.value || '').trim().toLowerCase();
-        state.coachPersona = ['ruthless', 'helpful', 'discovery'].includes(val) ? val : 'ruthless';
-        try { localStorage.setItem('coachPersona', state.coachPersona); } catch (e) {}
-        if (state.sessionId) {
-            try {
-                await fetch(`/session/${state.sessionId}/coach`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ persona: state.coachPersona })
-                });
-            } catch (e) { /* ignore */ }
+        const selected = (coachPersonaSelect.value || '').trim().toLowerCase();
+        const allowed = ['ruthless', 'helpful', 'discovery'];
+        const nextPersona = allowed.includes(selected) ? selected : 'discovery';
+        const prevPersona = state.coachPersona || 'discovery';
+
+        if (nextPersona === prevPersona && state.sessionId) {
+            return;
         }
-        appendVoiceMessage('system', `Coach persona set to ${state.coachPersona}.`);
+
+        const applyPersona = (value) => {
+            state.coachPersona = value;
+            try { localStorage.setItem('coachPersona', value); } catch (e) {}
+            upsertSavedSession({ id: state.sessionId, name: state.sessionName, updated_at: new Date().toISOString() });
+            appendVoiceMessage('system', `Coach persona set to ${value}.`);
+            logUiEvent('persona.change', { persona: value, persisted: Boolean(state.sessionId) });
+        };
+
+        if (!state.sessionId) {
+            applyPersona(nextPersona);
+            return;
+        }
+
+        try {
+            const res = await fetch(`/session/${state.sessionId}/coach`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ persona: nextPersona })
+            });
+            if (!res.ok) {
+                throw new Error(`Failed to update coach persona (${res.status})`);
+            }
+            applyPersona(nextPersona);
+        } catch (error) {
+            console.error('Unable to update coach persona:', error);
+            logUiEvent('persona.error', { targetPersona: nextPersona, message: error.message });
+            state.coachPersona = prevPersona;
+            coachPersonaSelect.value = prevPersona;
+            appendVoiceMessage('system', 'Unable to update coach persona. Reverting to previous selection.');
+        }
     });
 }
 
@@ -481,6 +913,7 @@ async function startVoiceInterview() {
 
     if (state.voice.peer) {
         console.debug('Voice interview already active');
+        logUiEvent('voice.session.duplicate', { connectionState: state.voice.peer.connectionState });
         return;
     }
 
@@ -488,6 +921,10 @@ async function startVoiceInterview() {
     updateVoiceStatus('Connecting...', 'pending');
     clearVoiceTranscript();
     appendVoiceMessage('system', '--- Starting new voice session ---');
+    logUiEvent('voice.session.start', {
+        persona: state.coachPersona || 'discovery',
+        agentName: state.agentName || 'Coach',
+    });
 
     try {
         const response = await fetch('/voice/session', {
@@ -498,7 +935,7 @@ async function startVoiceInterview() {
             body: JSON.stringify({
                 session_id: state.sessionId,
                 agent_name: state.agentName || 'Coach',
-                persona: state.coachPersona || 'ruthless'
+                persona: state.coachPersona || 'discovery'
             })
         });
 
@@ -535,6 +972,7 @@ async function startVoiceInterview() {
                 state.questions[state.currentQuestionIndex] ||
                 state.questions[0] ||
                 'Tell me about yourself.';
+            logUiEvent('voice.session.live', { openingQuestion });
 
             try {
                 dataChannel.send(JSON.stringify({
@@ -553,14 +991,20 @@ async function startVoiceInterview() {
             if (peer.connectionState !== 'closed') {
                 updateVoiceStatus('Voice channel closed', 'idle');
             }
+            logUiEvent('voice.session.channel.closed', {
+                connectionState: peer.connectionState,
+                readyState: dataChannel.readyState,
+            });
         };
 
         peer.onconnectionstatechange = () => {
             if (peer.connectionState === 'connected') {
                 updateVoiceStatus('Live', 'live');
+                logUiEvent('voice.session.connection', { state: 'connected' });
             } else if (['disconnected', 'failed'].includes(peer.connectionState)) {
                 updateVoiceStatus('Disconnected', 'error');
                 stopVoiceInterview({ silent: true, preserveStatus: true });
+                logUiEvent('voice.session.connection', { state: peer.connectionState });
             }
         };
 
@@ -577,7 +1021,10 @@ async function startVoiceInterview() {
             if (voiceAudio.srcObject !== remoteStream) {
                 voiceAudio.srcObject = remoteStream;
                 voiceAudio.classList.remove('hidden');
-                voiceAudio.play().catch(err => console.debug('Autoplay blocked:', err));
+                voiceAudio.play().catch(err => {
+                    console.debug('Autoplay blocked:', err);
+                    logUiEvent('voice.audio.autoplay_blocked', { message: err.message });
+                });
             }
         };
 
@@ -609,11 +1056,13 @@ async function startVoiceInterview() {
         updateVoiceStatus('Connection failed', 'error');
         stopVoiceInterview({ silent: true, preserveStatus: true });
         setVoiceControls(false);
+        logUiEvent('voice.session.error', { message: error.message });
     }
 }
 
 function stopVoiceInterview(options = {}) {
     const { silent = false, preserveStatus = false } = options;
+    logUiEvent('voice.session.stop', { silent, preserveStatus });
 
     if (state.voice.dataChannel) {
         try {
@@ -670,18 +1119,59 @@ function setupSpeechRecognition() {
     state.recognition.onresult = (event) => {
         let interimTranscript = '';
         let finalTranscript = '';
-        
+        let finalConfidence = null;
+
         for (let i = event.resultIndex; i < event.results.length; ++i) {
-            if (event.results[i].isFinal) {
-                finalTranscript += event.results[i][0].transcript;
+            const result = event.results[i];
+            if (!result || result.length === 0) {
+                continue;
+            }
+            const { transcript, confidence } = result[0];
+            if (result.isFinal) {
+                finalTranscript += transcript;
+                if (typeof confidence === 'number') {
+                    finalConfidence = confidence;
+                }
             } else {
-                interimTranscript += event.results[i][0].transcript;
+                interimTranscript += transcript;
             }
         }
-        
+
+        const existingAnswer = answerInput.value || '';
         if (finalTranscript) {
-            // Append to textarea instead of replacing
-            answerInput.value += ' ' + finalTranscript;
+            const appendedAnswer = existingAnswer ? `${existingAnswer} ${finalTranscript}` : finalTranscript;
+            answerInput.value = appendedAnswer.trim();
+        }
+
+        const voiceState = state.voice;
+        const transcriptReady = Boolean(voiceTranscript);
+        const voiceSessionActive = Boolean(
+            voiceState &&
+            transcriptReady &&
+            (voiceState.peer || voiceState.dataChannel)
+        );
+
+        if (!voiceSessionActive) {
+            return;
+        }
+
+        const stream = voiceState.userStreamingMessage;
+        const browserStreamActive = Boolean(stream && stream.source === 'browser_asr');
+        const now = Date.now();
+        const lastRealtimeTs = voiceState.lastRealtimeUserTranscriptAt || 0;
+        const realtimeFresh = lastRealtimeTs && (now - lastRealtimeTs < 1200);
+        const shouldUseFallback = browserStreamActive || !realtimeFresh;
+
+        if (interimTranscript && shouldUseFallback) {
+            appendUserTranscriptSegment(interimTranscript, { done: false, source: 'browser_asr' });
+        }
+
+        if (finalTranscript && shouldUseFallback) {
+            appendUserTranscriptSegment(finalTranscript, {
+                done: true,
+                source: 'browser_asr',
+                confidence: finalConfidence,
+            });
         }
     };
     
@@ -798,8 +1288,7 @@ document.addEventListener('DOMContentLoaded', () => {
     updateVoiceStatus('Offline', 'idle');
     setVoiceControls(false);
     setVoiceEnabled(false);
-    refreshSessionsList(state.sessionId);
-        refreshSwitcherList();
+    updateResumeControlsVisibility({ forceSync: true });
 });
 
 window.addEventListener('beforeunload', () => {
@@ -911,119 +1400,110 @@ async function renameSelectedSession() {
             throw new Error(detail || 'Failed to rename session');
         }
         renameSessionInput.value = '';
-        await refreshSessionsList(selectedId);
-        await refreshSwitcherList();
+        upsertSavedSession({ id: selectedId, name: newName, updated_at: new Date().toISOString() });
+        invalidateRemoteSessionsCache();
+        if (state.sessionId === selectedId) {
+            state.sessionName = newName;
+            if (sessionNameEl) {
+                sessionNameEl.textContent = state.sessionName;
+            }
+            try { localStorage.setItem('interviewSessionName', state.sessionName || ''); } catch (e) {}
+        }
+        updateResumeControlsVisibility({ forceSync: true });
     } catch (err) {
         console.error('Error renaming session:', err);
         alert('Unable to rename session.');
     }
 }
 
-async function refreshSessionsList(preselectId = null) {
+function refreshSessionsList(preselectId = null) {
     if (!resumeActions || !sessionsSelect) {
         return;
     }
-    try {
-        const res = await fetch('/sessions');
-        if (!res.ok) {
-            throw new Error('Failed to load sessions');
+
+    let items = loadSavedSessions();
+    if (!items.length) {
+        const fallback = fallbackSavedSessionFromLocalId();
+        if (fallback) {
+            items = [fallback];
+            upsertSavedSession(fallback);
         }
-        const items = await res.json();
-        sessionsSelect.innerHTML = '';
-        if (Array.isArray(items) && items.length > 0) {
-            items.forEach(item => {
+    }
+
+    sessionsSelect.innerHTML = '';
+    if (items.length > 0) {
+        items
+            .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''))
+            .forEach(item => {
                 const opt = document.createElement('option');
                 opt.value = item.id;
-                opt.textContent = `${item.name || 'Session'}${item.questions_count ? ` • ${item.questions_count} q` : ''}`;
+                opt.textContent = item.name || `Session ${String(item.id).slice(0, 8)}`;
                 sessionsSelect.appendChild(opt);
             });
-            const last = preselectId || localStorage.getItem('interviewSessionId');
-            if (last) {
-                sessionsSelect.value = last;
-            }
-            resumeActions.classList.remove('hidden');
-            if (sessionsCount) {
-                sessionsCount.textContent = `${items.length} saved`;
-            }
-        } else {
-            // Fallback: if we have a last-used session, fetch it and populate a single option
-            const last = localStorage.getItem('interviewSessionId');
-            if (last) {
-                try {
-                    const sres = await fetch(`/session/${last}`);
-                    if (sres.ok) {
-                        const sdata = await sres.json();
-                        const opt = document.createElement('option');
-                        opt.value = sdata.session_id || last;
-                        const display = sdata.name || `Session ${String(last).slice(0, 8)}`;
-                        opt.textContent = display;
-                        sessionsSelect.appendChild(opt);
-                        sessionsSelect.value = last;
-                        resumeActions.classList.remove('hidden');
-                        if (sessionsCount) {
-                            sessionsCount.textContent = `1 saved`;
-                        }
-                        return; // done
-                    }
-                } catch (e) {
-                    // ignore and hide panel below
-                }
-            }
-            resumeActions.classList.add('hidden');
-            if (sessionsCount) {
-                sessionsCount.textContent = '';
-            }
+        const last = preselectId || localStorage.getItem('interviewSessionId');
+        if (last) {
+            sessionsSelect.value = last;
         }
-    } catch (err) {
-        console.debug('No saved sessions found yet.');
+        resumeActions.classList.remove('hidden');
+        if (sessionsCount) {
+            sessionsCount.textContent = `${items.length} saved`;
+        }
+        logUiEvent('session.list.refresh', { count: items.length });
+    } else {
         resumeActions.classList.add('hidden');
+        if (sessionsCount) {
+            sessionsCount.textContent = '';
+        }
+        logUiEvent('session.list.clear', {});
     }
 }
 
-function updateResumeControlsVisibility() {
+function updateResumeControlsVisibility(options = {}) {
     if (!resumeActions) {
-        return;
+        return Promise.resolve();
     }
+    const { forceSync = false } = options;
     refreshSessionsList();
     refreshSwitcherList();
+    return syncSavedSessions({ force: forceSync })
+        .then(() => {
+            refreshSessionsList();
+            refreshSwitcherList();
+        })
+        .catch(() => {});
 }
 
 // Populate the switcher in the interview header
-async function refreshSwitcherList() {
+function refreshSwitcherList() {
     if (!switchSessionsSelect) return;
-    try {
-        const res = await fetch('/sessions');
-        if (!res.ok) throw new Error('Failed to load sessions');
-        const items = await res.json();
-        switchSessionsSelect.innerHTML = '';
-        if (Array.isArray(items) && items.length > 0) {
-            items.forEach(item => {
+    let items = loadSavedSessions();
+    if (!items.length) {
+        const fallback = fallbackSavedSessionFromLocalId();
+        if (fallback) {
+            items = [fallback];
+            upsertSavedSession(fallback);
+        }
+    }
+    switchSessionsSelect.innerHTML = '';
+    if (items.length > 0) {
+        items
+            .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''))
+            .forEach(item => {
                 const opt = document.createElement('option');
                 opt.value = item.id;
-                opt.textContent = item.name || `Session ${String(item.id).slice(0,8)}`;
+                opt.textContent = item.name || `Session ${String(item.id).slice(0, 8)}`;
                 switchSessionsSelect.appendChild(opt);
             });
-            if (state.sessionId) switchSessionsSelect.value = state.sessionId;
-        } else {
-            // Fallback to last-known or current
-            const last = localStorage.getItem('interviewSessionId');
-            const opt = document.createElement('option');
-            const val = last || state.sessionId;
-            if (val) {
-                opt.value = val;
-                opt.textContent = state.sessionName || `Session ${String(val).slice(0,8)}`;
-                switchSessionsSelect.appendChild(opt);
-            }
-        }
-    } catch (err) {
-        // Fallback: ensure current session appears
-        switchSessionsSelect.innerHTML = '';
         if (state.sessionId) {
-            const opt = document.createElement('option');
-            opt.value = state.sessionId;
-            opt.textContent = state.sessionName || `Session ${String(state.sessionId).slice(0,8)}`;
-            switchSessionsSelect.appendChild(opt);
+            switchSessionsSelect.value = state.sessionId;
         }
+        logUiEvent('session.switcher.refresh', { count: items.length });
+    } else if (state.sessionId) {
+        const opt = document.createElement('option');
+        opt.value = state.sessionId;
+        opt.textContent = state.sessionName || `Session ${String(state.sessionId).slice(0, 8)}`;
+        switchSessionsSelect.appendChild(opt);
+        logUiEvent('session.switcher.refresh', { count: 1 });
     }
 }
 
@@ -1032,23 +1512,69 @@ function toggleDocsPanel() {
     if (!docsPanel || !state.sessionId) return;
     const willShow = docsPanel.classList.contains('hidden');
     if (willShow) {
-        // Show panel immediately with loading indicators
         docsPanel.classList.remove('hidden');
-        if (resumeDocEl) resumeDocEl.textContent = 'Loading resume…';
-        if (jobDocEl) jobDocEl.textContent = 'Loading job description…';
+        logUiEvent('docs.view.open', { sessionId: state.sessionId });
+        if (resumeDocEl) {
+            resumeDocEl.textContent = 'Loading stored resume…';
+        }
+        if (jobDocEl) {
+            jobDocEl.textContent = 'Loading stored job description…';
+        }
         fetch(`/session/${state.sessionId}/documents`)
             .then(r => (r.ok ? r.json() : Promise.reject(new Error('Failed to load documents'))))
             .then(data => {
-                if (resumeDocEl) resumeDocEl.textContent = data.resume_text || '';
-                if (jobDocEl) jobDocEl.textContent = data.job_desc_text || '';
+                if (resumeDocEl) {
+                    const resume = data.resume || {};
+                    if (resume.present) {
+                        const stats = `${resume.words || 0} words • ${resume.characters || 0} characters`;
+                        resumeDocEl.textContent = '';
+                        const heading = document.createElement('div');
+                        heading.className = 'font-semibold text-indigo-700 text-sm mb-2';
+                        heading.textContent = `Resume Preview (${stats})`;
+                        const body = document.createElement('pre');
+                        body.className = 'whitespace-pre-wrap text-sm text-gray-800 max-h-64 overflow-y-auto';
+                        body.textContent = resume.text || resume.preview || '';
+                        resumeDocEl.appendChild(heading);
+                        resumeDocEl.appendChild(body);
+                    } else {
+                        resumeDocEl.textContent = 'No resume stored for this session.';
+                    }
+                }
+                if (jobDocEl) {
+                    const jobDoc = data.job_description || {};
+                    if (jobDoc.present) {
+                        const stats = `${jobDoc.words || 0} words • ${jobDoc.characters || 0} characters`;
+                        jobDocEl.textContent = '';
+                        const heading = document.createElement('div');
+                        heading.className = 'font-semibold text-indigo-700 text-sm mb-2';
+                        heading.textContent = `Job Description Preview (${stats})`;
+                        const body = document.createElement('pre');
+                        body.className = 'whitespace-pre-wrap text-sm text-gray-800 max-h-64 overflow-y-auto';
+                        body.textContent = jobDoc.text || jobDoc.preview || '';
+                        jobDocEl.appendChild(heading);
+                        jobDocEl.appendChild(body);
+                    } else {
+                        jobDocEl.textContent = 'No job description stored for this session.';
+                    }
+                }
+                const resume = data.resume || {};
+                const jobDoc = data.job_description || {};
+                logUiEvent('docs.view.ready', {
+                    resumePresent: Boolean(resume.present),
+                    resumeWords: resume.words || 0,
+                    jobPresent: Boolean(jobDoc.present),
+                    jobWords: jobDoc.words || 0,
+                });
             })
             .catch(err => {
                 console.error('Docs load error:', err);
-                if (resumeDocEl) resumeDocEl.textContent = 'Unable to load resume.';
-                if (jobDocEl) jobDocEl.textContent = 'Unable to load job description.';
+                if (resumeDocEl) resumeDocEl.textContent = 'Unable to load resume preview.';
+                if (jobDocEl) jobDocEl.textContent = 'Unable to load job description preview.';
+                logUiEvent('docs.view.error', { message: err.message });
             });
     } else {
         docsPanel.classList.add('hidden');
+        logUiEvent('docs.view.close', { sessionId: state.sessionId });
     }
 }
 
@@ -1062,6 +1588,10 @@ async function resumeSavedSession(sessionIdOverride = null) {
         updateResumeControlsVisibility();
         return;
     }
+
+    await syncSavedSessions().catch(() => {});
+    const savedMeta = getSavedSession(savedSessionId);
+    logUiEvent('session.resume.request', { sessionId: savedSessionId });
 
     try {
         stopVoiceInterview({ silent: true });
@@ -1086,14 +1616,17 @@ async function resumeSavedSession(sessionIdOverride = null) {
 
         state = createInitialState();
         state.sessionId = data.session_id;
-        state.sessionName = data.name || null;
+        state.sessionName = data.name || (savedMeta && savedMeta.name) || null;
         state.questions = data.questions || [];
         state.answers = data.answers || [];
         state.evaluations = data.evaluations || [];
         // Sync coach persona from server or localStorage fallback
-        state.coachPersona = (data.coach_persona || localStorage.getItem('coachPersona') || 'ruthless');
+        state.coachPersona = (data.coach_persona || localStorage.getItem('coachPersona') || 'discovery');
         if (coachPersonaSelect) coachPersonaSelect.value = state.coachPersona;
         localStorage.setItem('interviewSessionId', state.sessionId);
+        try { localStorage.setItem('interviewSessionName', state.sessionName || ''); } catch (e) {}
+        upsertSavedSession({ id: state.sessionId, name: state.sessionName, updated_at: new Date().toISOString() });
+        updateResumeControlsVisibility();
 
         const persistedIndex = typeof data.current_question_index === 'number'
             ? data.current_question_index
@@ -1120,6 +1653,13 @@ async function resumeSavedSession(sessionIdOverride = null) {
         updateVoiceStatus(hasQuestions ? 'Ready for voice coaching' : 'Offline', 'idle');
         clearVoiceTranscript();
 
+        logUiEvent('session.resume.success', {
+            sessionId: state.sessionId,
+            name: state.sessionName,
+            questionCount: state.questions.length,
+            currentIndex: state.currentQuestionIndex,
+        });
+
         if (!hasQuestions) {
             if (interviewContainer) {
                 interviewContainer.classList.remove('hidden');
@@ -1145,8 +1685,10 @@ async function resumeSavedSession(sessionIdOverride = null) {
         updateResumeControlsVisibility();
     } catch (error) {
         console.error('Error resuming session:', error);
+        logUiEvent('session.resume.error', { sessionId: savedSessionId, message: error.message });
         alert('Unable to resume the saved session. It may have expired or been removed.');
         localStorage.removeItem('interviewSessionId');
+        removeSavedSession(savedSessionId);
         updateResumeControlsVisibility();
         if (loadingSection) {
             loadingSection.classList.add('hidden');
@@ -1177,6 +1719,7 @@ async function clearSavedSession() {
         return;
     }
 
+    logUiEvent('session.delete.request', { sessionId: selectedId });
     try {
         const response = await fetch(`/session/${selectedId}`, { method: 'DELETE' });
         if (!response.ok && response.status !== 404) {
@@ -1184,17 +1727,22 @@ async function clearSavedSession() {
         }
     } catch (error) {
         console.error('Error clearing saved session:', error);
+        logUiEvent('session.delete.error', { sessionId: selectedId, message: error.message });
         alert('Unable to clear the saved session right now. Please try again.');
         return;
     }
 
     if (localStorage.getItem('interviewSessionId') === selectedId) {
         localStorage.removeItem('interviewSessionId');
+        localStorage.removeItem('interviewSessionName');
     }
-    updateResumeControlsVisibility();
+    removeSavedSession(selectedId);
+    invalidateRemoteSessionsCache();
+    updateResumeControlsVisibility({ forceSync: true });
     if (state.sessionId === selectedId) {
         handleRestartInterview();
     }
+    logUiEvent('session.delete.success', { sessionId: selectedId });
 }
 
 // Handle document upload
@@ -1218,6 +1766,12 @@ async function handleDocumentUpload(e) {
         alert('Please upload a job description file or paste the job description text.');
         return;
     }
+
+    logUiEvent('session.create.start', {
+        resumeProvided: Boolean(resumeFile),
+        jobFileProvided: Boolean(jobFile),
+        jobTextProvided: Boolean(jobText),
+    });
 
     // Show loading section
     uploadSection.classList.add('hidden');
@@ -1246,11 +1800,22 @@ async function handleDocumentUpload(e) {
         
         const data = await response.json();
         state.sessionId = data.session_id;
+        state.sessionName = data.name || null;
         localStorage.setItem('interviewSessionId', state.sessionId);
-        updateResumeControlsVisibility();
+        try { localStorage.setItem('interviewSessionName', state.sessionName || ''); } catch (e) {}
+        upsertSavedSession({ id: state.sessionId, name: state.sessionName });
+        invalidateRemoteSessionsCache();
+        updateResumeControlsVisibility({ forceSync: true });
+        if (sessionNameEl) {
+            sessionNameEl.textContent = state.sessionName || `Session ${String(state.sessionId).slice(0, 8)}`;
+        }
         
         // Generate questions
         await generateQuestions();
+        logUiEvent('session.create.success', {
+            sessionId: state.sessionId,
+            name: state.sessionName,
+        });
 
         // Show interview section
         loadingSection.classList.add('hidden');
@@ -1261,6 +1826,7 @@ async function handleDocumentUpload(e) {
         
     } catch (error) {
         console.error('Error:', error);
+        logUiEvent('session.create.error', { message: error.message });
         alert('Error: ' + error.message);
         
         // Go back to upload section
@@ -1293,9 +1859,11 @@ async function generateQuestions() {
         updateVoiceStatus('Ready for voice coaching', 'idle');
         clearVoiceTranscript();
         updateQuestionPosition();
-        
+        logUiEvent('questions.generate.success', { count: Array.isArray(state.questions) ? state.questions.length : 0 });
+
     } catch (error) {
         console.error('Error generating questions:', error);
+        logUiEvent('questions.generate.error', { message: error.message });
         throw error;
     }
 }
@@ -1324,6 +1892,11 @@ function displayQuestion(index) {
 
     state.currentQuestionIndex = index;
     const question = state.questions[index];
+    logUiEvent('question.show', { index, question });
+    if (state.voice) {
+        state.voice.userStreamingMessage = null;
+        state.voice.userTranscriptBuffer = '';
+    }
     
     currentQuestion.textContent = question;
     answerInput.value = '';
@@ -1431,6 +2004,10 @@ function displayFeedback(evaluation) {
     document.getElementById('interview-container').classList.add('hidden');
     
     console.log("Received evaluation:", evaluation);
+    logUiEvent('feedback.show', {
+        score: evaluation && typeof evaluation.score === 'number' ? evaluation.score : null,
+        index: state.currentQuestionIndex,
+    });
     
     // Set feedback values
     scoreValue.textContent = `${evaluation.score}/10`;
@@ -1586,6 +2163,7 @@ function displayExampleAnswer(answer) {
 async function handleGetExample() {
     try {
         const question = state.questions[state.currentQuestionIndex];
+        logUiEvent('question.example.request', { index: state.currentQuestionIndex });
         
         // Get example answer
         const response = await fetch('/generate-example-answer', {
@@ -1611,6 +2189,7 @@ async function handleGetExample() {
         
         // Set example answer
         displayExampleAnswer(data.answer);
+        logUiEvent('question.example.success', { index: state.currentQuestionIndex });
         
         // Show example section
         exampleSection.classList.remove('hidden');
@@ -1618,6 +2197,7 @@ async function handleGetExample() {
         
     } catch (error) {
         console.error('Error:', error);
+        logUiEvent('question.example.error', { message: error.message });
         alert('Error: ' + error.message);
     }
 }
@@ -1626,9 +2206,18 @@ async function handleGetExample() {
 function handleNextQuestion() {
     // Move to next question or summary
     if (state.currentQuestionIndex >= state.questions.length - 1) {
+        logUiEvent('question.advance', {
+            from: state.currentQuestionIndex,
+            to: 'summary',
+        });
         displaySummary();
     } else {
-        displayQuestion(state.currentQuestionIndex + 1);
+        const nextIndex = state.currentQuestionIndex + 1;
+        logUiEvent('question.advance', {
+            from: state.currentQuestionIndex,
+            to: nextIndex,
+        });
+        displayQuestion(nextIndex);
     }
 }
 
@@ -1704,8 +2293,12 @@ function displaySummary() {
         li.textContent = improvement;
         overallImprovements.appendChild(li);
     });
-    
+
     // Show summary section
+    logUiEvent('summary.show', {
+        evaluations: evaluationCount,
+        averageScore: evaluationCount > 0 ? Number(avgScore.toFixed(2)) : null,
+    });
     summarySection.classList.remove('hidden');
     updateQuestionPosition();
     buildPerQuestionCards();

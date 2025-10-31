@@ -4,6 +4,4 @@ Resume:
 Job Description:
 {job_description_text}
 
-Generate {num_questions} interview questions for this candidate based on their resume and the job description.
-Return the response as a JSON array of question strings.
-
+Generate {num_questions} high-bar interview questions that pressure-test this candidate. Each question must reference resume and job description specifics, demand quantifiable proof, and probe distinct competencies (execution, architecture, leadership, trade-offs, failure recovery, customer impact). Be direct and uncompromising. Return a JSON array of raw question strings only.

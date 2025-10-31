@@ -2,14 +2,14 @@
 CODE REFACTORING ANALYSIS REPORT
 ======================================================================
 
-Total files analyzed: 7
-Total issues found: 26
+Total files analyzed: 6
+Total issues found: 20
 
 Issues by severity:
   Critical: 0
   High:     0
   Medium:   19
-  Low:      7
+  Low:      1
 
 ======================================================================
 
@@ -26,18 +26,9 @@ FILE: app/main.py
 🟡 Line 703: Deeply nested conditional (depth 4). Consider extracting to separate functions or using early returns.
 🟡 Line 1115: Function '_build_voice_instructions' is 70 lines long. Consider breaking it into smaller functions.
 
-FILE: app/middleware/request_logging.py
-----------------------------------------------------------------------
-🔵 Line 14: Function '_extract_session_id' is missing a docstring.
-🔵 Line 31: Class 'RequestLoggingMiddleware' is missing a docstring.
-
 FILE: app/models/interview_agent.py
 ----------------------------------------------------------------------
-🔵 Line 19: Function 'get_coach_prompt' is missing a docstring.
-🟡 Line 19: Function 'get_coach_prompt' is 91 lines long. Consider breaking it into smaller functions.
-🔵 Line 111: Class 'InterviewPracticeAgent' is missing a docstring.
-🔵 Line 112: Function '__init__' has 7 parameters. Consider using a config object or builder pattern.
-🔵 Line 112: Function '__init__' is missing a docstring.
+🟡 Line 44: Function '_prompt_discovery' is 55 lines long. Consider breaking it into smaller functions.
 
 FILE: app/utils/embedding_store.py
 ----------------------------------------------------------------------

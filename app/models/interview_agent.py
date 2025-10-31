@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import re
+from dataclasses import dataclass
 from typing import Dict, List, Any, Optional
 
 from openai import AsyncOpenAI
@@ -12,15 +13,17 @@ logger = logging.getLogger(__name__)
 
 
 def get_base_coach_prompt() -> str:
-    """Backwards compatibility alias for ruthless persona."""
+    """Return the legacy default coach prompt (ruthless).
+
+    This exists for backward compatibility with older code paths that
+    expect a single, non‑persona system prompt.
+    """
     return get_coach_prompt("ruthless")
 
-
-def get_coach_prompt(persona: str) -> str:
-    persona = (persona or "ruthless").strip().lower()
-    if persona == "helpful":
-        return (
-            """
+def _prompt_helpful() -> str:
+    """System prompt content for the Helpful coach persona."""
+    return (
+        """
 # Role:
 You are a Helpful Interview Coach. Your goal is to guide the candidate with constructive, empathetic, and clear feedback so they can iteratively improve their answers.
 
@@ -34,11 +37,14 @@ You are a Helpful Interview Coach. Your goal is to guide the candidate with cons
 - Positive, collaborative, and specific.
 - Use plain, direct language.
 - Focus on actionable tips and example phrasing.
-            """
-        ).strip()
-    if persona == "discovery":
-        return (
-            """
+        """
+    ).strip()
+
+
+def _prompt_discovery() -> str:
+    """System prompt content for the Discovery coach persona."""
+    return (
+        """
 # Project Instructions: Voice Agent for Work History Narrative Discovery (RISEN++)
 
 ## Role:
@@ -88,9 +94,12 @@ If below 0.8, simplify your questions and slow down the pace for better user cla
 - Use short sentences and natural phrasing.
 - Let silence be okay—give users space to think.
 - Avoid jargon; speak like a thoughtful guide, not an evaluator.
-            """
-        ).strip()
-    # default 'ruthless'
+        """
+    ).strip()
+
+
+def _prompt_ruthless() -> str:
+    """System prompt content for the Ruthless coach persona."""
     return (
         """
 # Role:
@@ -108,35 +117,70 @@ You are a Ruthless Interview Preparation Coach. Your expertise lies in identifyi
         """
     ).strip()
 
+
+def get_coach_prompt(persona: str) -> str:
+    """Return the system prompt for a given coach persona.
+
+    - Normalizes the provided ``persona`` slug (ruthless | helpful | discovery).
+    - Falls back to the ruthless prompt if the slug is missing or unknown.
+    """
+    slug = (persona or "ruthless").strip().lower()
+    if slug == "helpful":
+        return _prompt_helpful()
+    if slug == "discovery":
+        return _prompt_discovery()
+    return _prompt_ruthless()
+
+@dataclass
+class InterviewAgentConfig:
+    """Configuration for InterviewPracticeAgent.
+
+    Encapsulates required model credentials, session metadata, and persona
+    so the agent constructor avoids a long parameter list.
+    """
+    openai_api_key: str
+    openai_model: str
+    resume_text: str
+    job_description_text: str
+    session_id: Optional[str] = None
+    persona: str = "ruthless"
+
+
 class InterviewPracticeAgent:
-    def __init__(
-        self,
-        openai_api_key: str,
-        openai_model: str,
-        resume_text: str,
-        job_description_text: str,
-        session_id: Optional[str] = None,
-        persona: str = "ruthless",
-    ):
+    """Asynchronous interview coach for generating questions and feedback.
+
+    Uses OpenAI's Chat Completions API to:
+    - Generate interview questions from resume + job description
+    - Evaluate candidate answers into structured feedback
+    - Produce exemplar answers tailored to the candidate
+    """
+
+    def __init__(self, config: InterviewAgentConfig):
+        """Initialize the agent from a configuration object.
+
+        Parameters
+        - config: InterviewAgentConfig with API credentials, resume/JD text,
+          session id, and selected persona.
+        """
         # Initialize OpenAI client
-        self.client = AsyncOpenAI(api_key=openai_api_key)
-        self.openai_model = openai_model
-        self.session_id = session_id
-        
+        self.client = AsyncOpenAI(api_key=config.openai_api_key)
+        self.openai_model = config.openai_model
+        self.session_id = config.session_id
+
         # Store document texts
-        self.resume_text = resume_text
-        self.job_description_text = job_description_text
-        
+        self.resume_text = config.resume_text
+        self.job_description_text = config.job_description_text
+
         # Store interview state
         self.current_question_index = 0
         self.interview_questions = []
         self.user_answers = []
         self.feedback_history = []
         self.interview_in_progress = False
-        
-        log_prefix = f"session={session_id} " if session_id else ""
-        self.persona = (persona or "ruthless").lower()
-        logger.info("%sInitialized Interview Agent with OpenAI model: %s", log_prefix, openai_model)
+
+        log_prefix = f"session={config.session_id} " if config.session_id else ""
+        self.persona = (config.persona or "ruthless").lower()
+        logger.info("%sInitialized Interview Agent with OpenAI model: %s", log_prefix, config.openai_model)
     
     async def generate_interview_questions(self, num_questions: int = 5) -> List[str]:
         """Generate interview questions based on resume and job description."""

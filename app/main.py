@@ -25,7 +25,7 @@ from app.config import (
     KNOWLEDGE_STORE_DIR, WORK_HISTORY_STORE_FILE,
 )
 from app.utils.document_processor import allowed_file, save_uploaded_file, save_text_as_file, process_documents
-from app.models.interview_agent import InterviewPracticeAgent, get_base_coach_prompt
+from app.models.interview_agent import InterviewPracticeAgent, InterviewAgentConfig, get_base_coach_prompt
 from app.logging_config import setup_logging
 from app.logging_context import session_id_var
 from app.middleware.request_logging import RequestLoggingMiddleware
@@ -394,7 +394,7 @@ async def upload_documents(
         "resume_text": resume_text,
         "job_desc_text": job_desc_text,
         "name": default_name,
-        "coach_persona": "ruthless",
+        "coach_persona": "discovery",
         "questions": [],
         "answers": [],
         "evaluations": [],
@@ -728,7 +728,7 @@ async def get_session_status(session_id: str):
     return {
         "session_id": session_id,
         "name": session.get("name"),
-        "coach_persona": session.get("coach_persona", "ruthless"),
+        "coach_persona": session.get("coach_persona", "discovery"),
         "questions": session["questions"],
         "answers": session["answers"],
         "evaluations": session["evaluations"],
@@ -1062,7 +1062,7 @@ async def set_coach_persona(session_id: str, request: SetCoachPersonaRequest):
     """Set the coach persona for a session: ruthless | helpful | discovery."""
     session = _get_session(session_id)
     requested_persona = (request.persona or "").strip().lower()
-    current_persona = (session.get("coach_persona") or "ruthless").lower()
+    current_persona = (session.get("coach_persona") or "discovery").lower()
     current_display = _coach_display_name(current_persona)
     if requested_persona not in {"ruthless", "helpful", "discovery"}:
         log_event(
@@ -1074,7 +1074,7 @@ async def set_coach_persona(session_id: str, request: SetCoachPersonaRequest):
             coach=current_display,
         )
         raise HTTPException(status_code=400, detail="Invalid persona. Use ruthless, helpful, or discovery.")
-    previous_persona = session.get("coach_persona", "ruthless")
+    previous_persona = session.get("coach_persona", "discovery")
     if requested_persona == current_persona:
         log_event(
             "persona.update.noop",
@@ -1150,7 +1150,7 @@ def _build_voice_instructions(session_id: str, session: Dict[str, Any], agent_na
         relevant_snippets = []
 
     from app.models.interview_agent import get_coach_prompt
-    base_prompt = get_coach_prompt(persona or session.get("coach_persona") or "ruthless")
+    base_prompt = get_coach_prompt(persona or session.get("coach_persona") or "discovery")
     name_line = f"You are the interview coach named '{(agent_name or 'Coach')}'.".strip()
 
     snippets_block = "\n".join(relevant_snippets) if relevant_snippets else "- (No stored work-history snippets found)"
@@ -1191,7 +1191,7 @@ async def create_voice_session(request: VoiceSessionRequest):
 
     session = _get_session(request.session_id)
     voice_name = request.voice or OPENAI_REALTIME_VOICE
-    persona = (request.persona or session.get("coach_persona") or "ruthless").lower()
+    persona = (request.persona or session.get("coach_persona") or "discovery").lower()
     instructions = _build_voice_instructions(request.session_id, session, request.agent_name, persona)
     try:
         session_id_var.set(request.session_id)
@@ -1316,14 +1316,15 @@ async def start_agent(session_id: str):
 
     try:
         # Initialize the agent with session data
-        agent = InterviewPracticeAgent(
+        config = InterviewAgentConfig(
             openai_api_key=OPENAI_API_KEY,
             openai_model=OPENAI_MODEL,
             resume_text=session["resume_text"],
             job_description_text=session["job_desc_text"],
             session_id=session_id,
-            persona=session.get("coach_persona", "ruthless"),
+            persona=session.get("coach_persona", "discovery"),
         )
+        agent = InterviewPracticeAgent(config)
 
         # Start the agent
         await agent.start()

@@ -3,5 +3,4 @@ Interview Question: {question}
 Candidate's Answer: {answer}
 
 {voice_transcript_block}
-Please evaluate this response with constructive, specific suggestions.
-
+Evaluate this response with constructive, specific suggestions. Follow the JSON schema from the system prompt (score, strengths, weaknesses, feedback, why_asked, example_improvement). Highlight what the candidate did well, where to improve, and how to iterate. If a voice transcript is present, mention relevant delivery observations.

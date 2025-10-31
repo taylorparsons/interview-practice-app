@@ -4,6 +4,4 @@ Resume:
 Job Description:
 {job_description_text}
 
-Generate {num_questions} discovery prompts to elicit STAR+I stories (leadership, conflict, ambiguity, delivery, failure, customer focus).
-Return a JSON array of question strings.
-
+Generate {num_questions} discovery prompts to elicit STAR + I stories that cover leadership, conflict, ambiguity, delivery, failure, customer focus, and other high-signal themes. Reference resume and job description specifics (teams, scale, metrics, domains) and encourage reflection on stakes, decisions, collaboration, and lessons learned. Return a JSON array of question strings only.

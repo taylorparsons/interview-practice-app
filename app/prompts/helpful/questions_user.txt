@@ -4,6 +4,4 @@ Resume:
 Job Description:
 {job_description_text}
 
-Generate {num_questions} interview questions that will help the candidate practice and improve.
-Return a JSON array of question strings.
-
+Generate {num_questions} interview questions that will help the candidate practice and improve. Keep the tone encouraging yet challenging, tie each prompt to concrete resume and job description details (technologies, scope, metrics), and include a mix of behavioral (STAR + I), situational, and role-specific technical questions. Return a JSON array of question strings only.

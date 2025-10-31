@@ -8,3 +8,4 @@ Resume:
 Job Description:
 {job_description_text}
 
+Deliver a high-bar response that uses STAR + I, quantifies impact, highlights trade-offs and ownership, and anticipates follow-up grilling. Keep it confident, precise, and under 200 words. Output only the answer text.

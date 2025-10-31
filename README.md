@@ -1,5 +1,14 @@
 # Interview Practice App
 
+## Context Recap
+- Every bug fix must include automated test coverage and a manual run-through in the app to confirm the behaviour change.
+- Front-end interactions should emit helpful `console.debug` traces whenever the UI state changes (persona switches, voice session lifecycle, document previews, etc.).
+- Server logs should use descriptive event names and include relevant context (session ids, personas, counts) so troubleshooting is fast.
+- Current UI regressions to verify and maintain:
+  - Voice transcript pane must render both the coach’s prompts and the candidate’s replies.
+  - “View Docs” needs to surface resume/job description previews instead of empty placeholders.
+  - The home screen should auto-populate the most recent saved session so users can resume quickly.
+
 ## Overview
 An AI-powered interview practice application that helps job seekers prepare for interviews by generating personalized questions, providing real-time feedback, and offering example answers.
 
@@ -249,6 +258,9 @@ Pick a coaching style for both text and voice flows:
 - Ruthless Coach: strict, high‑bar, precision‑focused evaluator.
 - Helpful Coach: constructive and encouraging with actionable tips.
 - Discovery Coach: elicits STAR+I narratives from work history to build story inventory.
+
+Default
+- New sessions and the UI default to Discovery Coach. You can change the persona anytime from the selector or via the API.
 
 How to switch:
 - UI: use the “Coach persona” selector in the Voice Interview Coach panel.

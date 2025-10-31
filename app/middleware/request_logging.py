@@ -12,6 +12,14 @@ logger = logging.getLogger(__name__)
 
 
 def _extract_session_id(request: Request) -> str | None:
+    """Best-effort extraction of a session id from the incoming request.
+
+    Order of precedence:
+    - `session_id` query parameter
+    - Path pattern `/session/{id}`
+    - `X-Session-ID` header
+    Returns None if no candidate is found.
+    """
     # Prefer query param
     sid = request.query_params.get("session_id")
     if sid:
@@ -29,7 +37,15 @@ def _extract_session_id(request: Request) -> str | None:
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
+    """Structured request logging with correlation ids and timing.
+
+    Adds `request_id` and `session_id` context to all logs via ContextVars,
+    emits `request.start` and `request.end` events, and attaches the
+    `X-Request-ID` header on responses.
+    """
+
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        """Log request lifecycle and forward to the next ASGI app."""
         start = time.perf_counter()
         rid = str(uuid.uuid4())
         request_id_var.set(rid)
@@ -80,4 +96,3 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             },
         )
         return response
-
