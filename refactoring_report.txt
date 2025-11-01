@@ -23,12 +23,12 @@ FILE: app/logging_context.py
 
 FILE: app/main.py
 ----------------------------------------------------------------------
-🟡 Line 703: Deeply nested conditional (depth 4). Consider extracting to separate functions or using early returns.
-🟡 Line 1115: Function '_build_voice_instructions' is 70 lines long. Consider breaking it into smaller functions.
+🟡 Line 708: Deeply nested conditional (depth 4). Consider extracting to separate functions or using early returns.
+🟡 Line 1120: Function '_build_voice_instructions' is 70 lines long. Consider breaking it into smaller functions.
 
 FILE: app/models/interview_agent.py
 ----------------------------------------------------------------------
-🟡 Line 44: Function '_prompt_discovery' is 55 lines long. Consider breaking it into smaller functions.
+🟡 Line 50: Function '_prompt_discovery' is 55 lines long. Consider breaking it into smaller functions.
 
 FILE: app/utils/embedding_store.py
 ----------------------------------------------------------------------
@@ -50,6 +50,3 @@ FILE: app/utils/vector_store.py
 🟡 Line 255: Deeply nested conditional (depth 6). Consider extracting to separate functions or using early returns.
 🟡 Line 267: Deeply nested conditional (depth 5). Consider extracting to separate functions or using early returns.
 🟡 Line 269: Deeply nested conditional (depth 4). Consider extracting to separate functions or using early returns.
-
-
-Report saved to: refactoring_report.txt

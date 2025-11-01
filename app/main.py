@@ -25,7 +25,12 @@ from app.config import (
     KNOWLEDGE_STORE_DIR, WORK_HISTORY_STORE_FILE,
 )
 from app.utils.document_processor import allowed_file, save_uploaded_file, save_text_as_file, process_documents
-from app.models.interview_agent import InterviewPracticeAgent, InterviewAgentConfig, get_base_coach_prompt
+from app.models.interview_agent import (
+    InterviewPracticeAgent,
+    InterviewAgentConfig,
+    get_base_coach_prompt,
+    get_voice_system_prompt,
+)
 from app.logging_config import setup_logging
 from app.logging_context import session_id_var
 from app.middleware.request_logging import RequestLoggingMiddleware
@@ -1149,8 +1154,8 @@ def _build_voice_instructions(session_id: str, session: Dict[str, Any], agent_na
         log_event("knowledge.search.error", level="exception", session_id=session_id)
         relevant_snippets = []
 
-    from app.models.interview_agent import get_coach_prompt
-    base_prompt = get_coach_prompt(persona or session.get("coach_persona") or "discovery")
+    persona_slug = persona or session.get("coach_persona") or "discovery"
+    base_prompt = get_voice_system_prompt(persona_slug)
     name_line = f"You are the interview coach named '{(agent_name or 'Coach')}'.".strip()
 
     snippets_block = "\n".join(relevant_snippets) if relevant_snippets else "- (No stored work-history snippets found)"

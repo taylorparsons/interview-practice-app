@@ -113,6 +113,7 @@ When running the UI tests, ensure the server is reachable at `http://localhost:8
 - The browser will prompt for microphone access—grant permission so the agent can hear you.
 - Conversation summaries stream into the transcript panel while audio plays through the embedded `<audio>` element.
 - Use **Stop Voice Session** to release the connection, or restart the interview to reset the voice UI.
+- Voice persona system prompts live at `app/prompts/<persona>/voice_system.txt`; edit these files to update realtime instructions per persona.
 
 ### Voice Turn Detection (VAD) settings
 You can control server-side turn detection behavior via environment variables in `.env`:

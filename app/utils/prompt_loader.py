@@ -9,7 +9,7 @@ def load_prompt_template(persona: str, scope: str, role: str) -> Optional[str]:
     """Load a text template for a given persona/scope/role.
 
     - persona: one of ruthless|helpful|discovery
-    - scope: questions|evaluation|example
+    - scope: questions|evaluation|example|voice
     - role: system|user
     Returns the file contents or None if missing.
     """
@@ -20,4 +20,3 @@ def load_prompt_template(persona: str, scope: str, role: str) -> Optional[str]:
     except Exception:
         pass
     return None
-

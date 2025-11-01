@@ -20,6 +20,12 @@ def get_base_coach_prompt() -> str:
     """
     return get_coach_prompt("ruthless")
 
+
+def _normalize_persona_slug(persona: Optional[str]) -> str:
+    """Normalize persona input to a lowercase slug with ruthless as default."""
+    slug = (persona or "ruthless").strip().lower()
+    return slug or "ruthless"
+
 def _prompt_helpful() -> str:
     """System prompt content for the Helpful coach persona."""
     return (
@@ -118,18 +124,31 @@ You are a Ruthless Interview Preparation Coach. Your expertise lies in identifyi
     ).strip()
 
 
+_PERSONA_PROMPT_FALLBACKS = {
+    "helpful": _prompt_helpful,
+    "discovery": _prompt_discovery,
+    "ruthless": _prompt_ruthless,
+}
+
+
+def get_voice_system_prompt(persona: Optional[str]) -> str:
+    """Load the voice system prompt for a persona, falling back to legacy text."""
+    slug = _normalize_persona_slug(persona)
+    prompt = load_prompt_template(slug, "voice", "system")
+    if prompt:
+        return prompt
+    fallback_factory = _PERSONA_PROMPT_FALLBACKS.get(slug, _prompt_ruthless)
+    return fallback_factory()
+
+
 def get_coach_prompt(persona: str) -> str:
     """Return the system prompt for a given coach persona.
 
     - Normalizes the provided ``persona`` slug (ruthless | helpful | discovery).
+    - Loads the `voice_system` template when available so text/voice share content.
     - Falls back to the ruthless prompt if the slug is missing or unknown.
     """
-    slug = (persona or "ruthless").strip().lower()
-    if slug == "helpful":
-        return _prompt_helpful()
-    if slug == "discovery":
-        return _prompt_discovery()
-    return _prompt_ruthless()
+    return get_voice_system_prompt(persona)
 
 @dataclass
 class InterviewAgentConfig:

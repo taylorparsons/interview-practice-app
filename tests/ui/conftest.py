@@ -1,13 +1,16 @@
 """Shared Selenium/Helium fixtures and artifact captures for UI tests."""
 
 import os
+import platform
 import re
+import subprocess
 from datetime import datetime
 from pathlib import Path
 
 import pytest
 from helium import go_to, set_driver
 from selenium import webdriver
+from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
@@ -42,6 +45,35 @@ class FlowCapture:
         return path
 
 
+def _create_chrome_driver(options: Options):
+    """Attempt to launch Chrome via Selenium Manager, falling back to WebDriver Manager."""
+    try:
+        return webdriver.Chrome(options=options)
+    except WebDriverException:
+        driver_path = ChromeDriverManager().install()
+        _maybe_clear_quarantine(Path(driver_path))
+        service = Service(driver_path)
+        try:
+            return webdriver.Chrome(service=service, options=options)
+        except WebDriverException as exc:
+            pytest.skip(f"Chrome browser could not be started: {exc}")
+
+
+def _maybe_clear_quarantine(driver_path: Path) -> None:
+    """Remove macOS quarantine attributes so downloaded drivers can execute."""
+    if platform.system() != "Darwin":
+        return
+    try:
+        subprocess.run(
+            ["xattr", "-dr", "com.apple.quarantine", str(driver_path)],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        pass
+
+
 @pytest.fixture(scope="session")
 def base_url() -> str:
     """Base URL of the running app under test."""
@@ -59,8 +91,7 @@ def browser(request: pytest.FixtureRequest, base_url: str):
     if not _headful_requested():
         options.add_argument("--headless=new")
 
-    service = Service(ChromeDriverManager().install())
-    driver = webdriver.Chrome(service=service, options=options)
+    driver = _create_chrome_driver(options)
     set_driver(driver)
     flow_capture = FlowCapture(driver, request.node.name)
     request.node._flow_capture = flow_capture  # type: ignore[attr-defined]

@@ -283,3 +283,54 @@ def test_persona_update_invalid_uses_current_coach_display(client: TestClient, c
     assert any(getattr(record, "ctx_coach", None) == "Helpful Coach" for record in invalid_logs)
 
     client.delete(f"/session/{session_id}")
+
+
+def test_build_voice_instructions_uses_voice_template(monkeypatch) -> None:
+    class DummyStore:
+        def search(self, q: str, k: int = 5):
+            return []
+
+    monkeypatch.setattr(main_module, "_get_work_history_store", lambda: DummyStore())
+
+    session = {
+        "questions": ["How do you prioritize competing tasks?"],
+        "resume_text": "Sample resume content",
+        "job_desc_text": "Sample JD content",
+    }
+    instructions = main_module._build_voice_instructions(
+        "session-voice",
+        session,
+        agent_name="Coach",
+        persona="helpful",
+    )
+    assert "You are a Helpful Interview Coach." in instructions
+    assert "Positive, collaborative, and specific." in instructions
+
+
+def test_build_voice_instructions_defaults_to_discovery(monkeypatch) -> None:
+    class DummyStore:
+        def search(self, q: str, k: int = 5):
+            return []
+
+    monkeypatch.setattr(main_module, "_get_work_history_store", lambda: DummyStore())
+
+    session = {
+        "questions": [],
+        "resume_text": "Resume text",
+        "job_desc_text": "JD text",
+    }
+    instructions = main_module._build_voice_instructions(
+        "session-default",
+        session,
+        agent_name="Coach",
+        persona=None,
+    )
+    assert "You are a Discovery Interview Coach" in instructions
+
+
+def test_get_voice_system_prompt_falls_back(monkeypatch) -> None:
+    import app.models.interview_agent as agent_module
+
+    monkeypatch.setattr(agent_module, "load_prompt_template", lambda *args, **kwargs: None)
+    prompt = agent_module.get_voice_system_prompt("helpful")
+    assert "You are a Helpful Interview Coach." in prompt
