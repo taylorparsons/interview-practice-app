@@ -1,3 +1,5 @@
+"""End-to-end UI test verifying the default Discovery coach selection."""
+
 from helium import S, Text, wait_until, write, click, Button
 from selenium.webdriver.support.ui import Select
 from pathlib import Path

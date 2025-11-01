@@ -47,3 +47,12 @@ app/uploads/
 
 # Knowledge store (local vectors)
 app/knowledge_store/
+
+# Analyzer outputs
+analyzer_out.txt
+
+# Generated audio responses
+audio_responses/
+
+# UI test artifacts
+tests/ui/__artifacts__/

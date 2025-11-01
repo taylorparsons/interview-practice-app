@@ -102,6 +102,12 @@ When running the UI tests, ensure the server is reachable at `http://localhost:8
 - `./test.sh`: Runs the test suite with `pytest -q`. Use `--health` to ping the running server (`http://localhost:8000` by default) after tests, or override the health-check target with `--url <base_url>`.
 - `./run_usertests.sh`: Installs Helium/Selenium UI dependencies from `requirements-dev.txt` and runs the browser smoke tests in `tests/ui/`. Set `UI_BASE_URL` if the app is not on `http://localhost:8000`. The script writes a Markdown summary to `tests/ui/__artifacts__/usertests_report.md` plus raw logs in `usertests.pytest.log`.
 
+## Contributor Toolkit
+- `references/` contains the shared refactoring and operational playbooks (`advanced_topics.md`, `best_practices.md`, etc.) so engineers can align on safe cleanup patterns while working in the app.
+- `scripts/` holds automation that enforces the playbook: `analyze_code.py` surfaces long functions/deep nesting before refactors, and `refactor_code.py` applies targeted AST cleanups.
+- `templates/` packages code/test scaffolds referenced in the playbook. Use them to spin up new helpers, routers, or focused pytest modules that match the repo style.
+- `tests/api/` and `tests/ui/` provide the baseline regression coverage for session flows and front-end persona defaults. Each module includes high-level docstrings explaining the scenarios they guard.
+
 ## Realtime Voice Interviews
 - Upload your resume and job description to start a session, then click **Start Voice Session** to open a WebRTC call with the `gpt-realtime-mini-2025-10-06` coach.
 - The browser will prompt for microphone access—grant permission so the agent can hear you.

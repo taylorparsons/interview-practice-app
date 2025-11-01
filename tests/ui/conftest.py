@@ -1,3 +1,5 @@
+"""Shared Selenium/Helium fixtures and artifact captures for UI tests."""
+
 import os
 import re
 from datetime import datetime

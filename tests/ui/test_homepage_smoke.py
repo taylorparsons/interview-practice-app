@@ -1,3 +1,5 @@
+"""UI smoke test to ensure the landing page renders core upload widgets."""
+
 from helium import Button, S, Text, wait_until
 
 
