@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -99,7 +100,7 @@ def test_voice_transcripts_and_coach_text_roundtrip(client: TestClient) -> None:
     session_meta = _upload_session(client)
     session_id = session_meta["session_id"]
 
-    transcript_payload = {"question_index": 0, "text": "User said hello."}
+    transcript_payload = {"question_index": 0, "text": "User said hello.", "source": "realtime"}
     coach_payload = {"question_index": 0, "text": "Coach replied with feedback."}
 
     save_user = client.post(f"/session/{session_id}/voice-transcript", json=transcript_payload)
@@ -115,7 +116,32 @@ def test_voice_transcripts_and_coach_text_roundtrip(client: TestClient) -> None:
     session_data = session_response.json()
 
     assert session_data["voice_transcripts"]["0"] == transcript_payload["text"]
+    assert session_data["voice_user_text"]["0"] == transcript_payload["text"]
     assert session_data["voice_agent_text"]["0"] == coach_payload["text"]
+
+    client.delete(f"/session/{session_id}")
+
+
+def test_voice_transcript_export_returns_entries(client: TestClient) -> None:
+    session_meta = _upload_session(client)
+    session_id = session_meta["session_id"]
+
+    client.post(f"/session/{session_id}/voice-transcript", json={"question_index": 0, "text": "Candidate answer"})
+    client.post(f"/session/{session_id}/voice-agent-text", json={"question_index": 0, "text": "Coach guidance"})
+
+    export_response = client.get(f"/session/{session_id}/voice-transcript/export?format=json")
+    assert export_response.status_code == 200
+    payload = export_response.json()
+
+    assert payload["session_id"] == session_id
+    assert isinstance(payload["entries"], list)
+    assert payload["entries"], "Expected at least one export entry"
+    assert payload["entries"][0]["question_index"] == 0
+    assert payload["entries"][0]["candidate_text"] == "Candidate answer"
+    assert payload["entries"][0]["coach_text"] == "Coach guidance"
+
+    unsupported = client.get(f"/session/{session_id}/voice-transcript/export?format=csv")
+    assert unsupported.status_code == 415
 
     client.delete(f"/session/{session_id}")
 
@@ -174,6 +200,8 @@ def test_voice_session_logs_coach_name(monkeypatch, client: TestClient, caplog: 
                 "expires_at": 123,
             }
 
+    requested_payloads: list[dict[str, Any]] = []
+
     class DummyAsyncClient:
         def __init__(self, *args, **kwargs) -> None:
             pass
@@ -185,6 +213,9 @@ def test_voice_session_logs_coach_name(monkeypatch, client: TestClient, caplog: 
             return False
 
         async def post(self, *args, **kwargs):
+            payload = kwargs.get("json")
+            if isinstance(payload, dict):
+                requested_payloads.append(payload)
             return DummyResponse()
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -202,6 +233,12 @@ def test_voice_session_logs_coach_name(monkeypatch, client: TestClient, caplog: 
             },
         )
     assert response.status_code == 200
+
+    assert requested_payloads, "Expected realtime provisioning payload to be captured"
+    payload = requested_payloads[0]
+    transcription = payload.get("input_audio_transcription")
+    assert isinstance(transcription, dict), "Expected input_audio_transcription config in payload"
+    assert transcription.get("model") == main_module.OPENAI_INPUT_TRANSCRIPTION_MODEL
 
     success_logs = [
         record for record in caplog.records if record.msg == "voice.session.create.success"

@@ -23,6 +23,7 @@ from app.config import (
     OPENAI_TURN_DETECTION, OPENAI_TURN_THRESHOLD, OPENAI_TURN_PREFIX_MS, OPENAI_TURN_SILENCE_MS,
     UPLOAD_FOLDER, ALLOWED_EXTENSIONS,
     KNOWLEDGE_STORE_DIR, WORK_HISTORY_STORE_FILE,
+    OPENAI_INPUT_TRANSCRIPTION_MODEL,
 )
 from app.utils.document_processor import allowed_file, save_uploaded_file, save_text_as_file, process_documents
 from app.models.interview_agent import (
@@ -297,6 +298,7 @@ class SaveTranscriptRequest(BaseModel):
     """Body payload for persisting a voice transcript snippet."""
     question_index: int
     text: str
+    source: Optional[str] = None
 
 
 class SaveAgentTextRequest(BaseModel):
@@ -519,8 +521,15 @@ async def evaluate_answer(request: EvaluateAnswerRequest):
             # Prefer client-provided transcript, fall back to persisted
             transcript_text = (request.voice_transcript or "").strip()
             if not transcript_text:
-                transcripts = session.get("voice_transcripts", {})
-                transcript_text = transcripts.get(str(idx)) or transcripts.get(idx) or ""
+                user_transcripts = session.get("voice_user_text") or {}
+                transcripts = session.get("voice_transcripts") or {}
+                transcript_text = (
+                    user_transcripts.get(str(idx))
+                    or user_transcripts.get(idx)
+                    or transcripts.get(str(idx))
+                    or transcripts.get(idx)
+                    or ""
+                )
 
             log_event(
                 "evaluation.agent",
@@ -739,6 +748,7 @@ async def get_session_status(session_id: str):
         "evaluations": session["evaluations"],
         "current_question_index": session.get("current_question_index", 0),
         "voice_transcripts": session.get("voice_transcripts", {}),
+        "voice_user_text": session.get("voice_user_text", {}),
         "per_question": session.get("per_question", []),
         "voice_agent_text": session.get("voice_agent_text", {}),
     }
@@ -788,15 +798,20 @@ async def get_session_documents(session_id: str):
 async def save_voice_transcript(session_id: str, payload: SaveTranscriptRequest):
     """Persist voice transcript text for a given question index."""
     session = _get_session(session_id)
+    text_value = (payload.text or "").strip()
     vt = session.get("voice_transcripts") or {}
-    vt[str(payload.question_index)] = payload.text or ""
+    vt[str(payload.question_index)] = text_value
     session["voice_transcripts"] = vt
+    user_map = session.get("voice_user_text") or {}
+    user_map[str(payload.question_index)] = text_value
+    session["voice_user_text"] = user_map
     _persist_session_state(session_id, session)
     log_event(
-        "voice.transcript.save",
+        "voice.transcript.user.save",
         session_id=session_id,
         question_index=payload.question_index,
-        characters=len(payload.text or ""),
+        characters=len(text_value),
+        source=(payload.source or "").strip() or None,
     )
     return {"ok": True}
 
@@ -820,6 +835,66 @@ async def save_voice_agent_text(session_id: str, payload: SaveAgentTextRequest):
         preview=preview or None,
     )
     return {"ok": True}
+
+
+@app.get("/session/{session_id}/voice-transcript/export")
+async def export_voice_transcript(session_id: str, format: str = "json"):
+    """Export the persisted voice conversation for a session."""
+    export_format = (format or "json").strip().lower()
+    if export_format != "json":
+        raise HTTPException(status_code=415, detail="Only JSON export is supported.")
+
+    session = _get_session(session_id)
+    try:
+        session_id_var.set(session_id)
+    except Exception:
+        pass
+
+    user_map = session.get("voice_user_text") or {}
+    legacy_map = session.get("voice_transcripts") or {}
+    coach_map = session.get("voice_agent_text") or {}
+    questions = session.get("questions") or []
+
+    indices: set[int] = set(range(len(questions)))
+    for mapping in (user_map, legacy_map, coach_map):
+        for raw_key in (mapping or {}).keys():
+            try:
+                indices.add(int(raw_key))
+            except (TypeError, ValueError):
+                continue
+
+    entries = []
+    for idx in sorted(indices):
+        idx_key = str(idx)
+        question_text = questions[idx] if idx < len(questions) else None
+        candidate_text = (
+            (user_map.get(idx_key) or user_map.get(idx)) or
+            (legacy_map.get(idx_key) or legacy_map.get(idx)) or
+            ""
+        )
+        coach_text = (coach_map.get(idx_key) or coach_map.get(idx) or "")
+        if not any([question_text, candidate_text, coach_text]):
+            continue
+        entries.append({
+            "question_index": idx,
+            "question": question_text,
+            "candidate_text": candidate_text,
+            "coach_text": coach_text,
+        })
+
+    payload = {
+        "session_id": session_id,
+        "name": session.get("name"),
+        "generated_at": datetime.utcnow().isoformat() + "Z",
+        "entries": entries,
+    }
+    log_event(
+        "voice.transcript.export",
+        session_id=session_id,
+        format=export_format,
+        entries=len(entries),
+    )
+    return JSONResponse(content=payload)
 
 
 def _get_work_history_store():
@@ -956,13 +1031,15 @@ async def memorize_voice_transcript(session_id: str, req: MemorizeTranscriptRequ
     - When `summarize` is true, it generates a concise STAR-style snippet before saving.
     """
     session = _get_session(session_id)
+    user_map = session.get("voice_user_text") or {}
     vt_map = session.get("voice_transcripts") or {}
+    combined_map = {**{str(k): v for k, v in vt_map.items()}, **{str(k): v for k, v in user_map.items()}}
     qidx = req.question_index
     text = (req.text or "").strip()
     if not text:
         if qidx is None:
             raise HTTPException(status_code=400, detail="Provide text or question_index")
-        text = (vt_map.get(str(qidx)) or vt_map.get(qidx) or "").strip()
+        text = (combined_map.get(str(qidx)) or combined_map.get(qidx) or "").strip()
         if not text:
             raise HTTPException(status_code=404, detail="No transcript found for that index")
 
@@ -1218,6 +1295,13 @@ async def create_voice_session(request: VoiceSessionRequest):
         "instructions": instructions,
     }
 
+    transcription_model = (OPENAI_INPUT_TRANSCRIPTION_MODEL or "").strip()
+    if transcription_model:
+        payload["input_audio_transcription"] = {
+            "model": transcription_model,
+            "language": "en",
+        }
+
     # Optional server-side VAD (turn detection) configuration
     try:
         td_mode = (OPENAI_TURN_DETECTION or "server_vad").strip().lower()
@@ -1255,11 +1339,17 @@ async def create_voice_session(request: VoiceSessionRequest):
             response.raise_for_status()
     except httpx.HTTPStatusError as exc:
         detail = "Unable to start realtime voice session"
+        error_payload: Optional[str]
+        try:
+            error_payload = exc.response.text
+        except Exception:
+            error_payload = None
         log_event(
             "voice.session.create.error",
             level="exception",
             session_id=request.session_id,
             status=exc.response.status_code,
+            error=error_payload,
         )
         raise HTTPException(status_code=exc.response.status_code, detail=detail)
     except httpx.HTTPError:

@@ -9,6 +9,8 @@ function createInitialVoiceState() {
         remoteStream: null,
         transcriptBuffer: '',
         transcriptsByIndex: {},
+        persistedByIndex: {},
+        coachTextByIndex: {},
         messages: [],
         streamingMessage: null,
         userTranscriptBuffer: '',
@@ -114,6 +116,7 @@ const SESSION_SYNC_TTL_MS = 30_000;
 let remoteSessionsCache = [];
 let remoteSessionsFetchedAt = 0;
 let remoteSessionsPromise = null;
+let voiceTimelineViewed = false;
 
 function logUiEvent(eventSlug, details = {}) {
     if (typeof console === 'undefined' || typeof console.debug !== 'function') {
@@ -127,6 +130,20 @@ function logUiEvent(eventSlug, details = {}) {
         base.questionIndex = state.currentQuestionIndex;
     }
     console.debug(`[ui] ${eventSlug}`, { ...base, ...details });
+}
+
+if (voiceTranscript) {
+    voiceTranscript.addEventListener('scroll', () => {
+        if (voiceTimelineViewed) {
+            return;
+        }
+        const threshold = Math.max(40, voiceTranscript.scrollHeight * 0.5);
+        const current = voiceTranscript.scrollTop + voiceTranscript.clientHeight;
+        if (current >= threshold) {
+            voiceTimelineViewed = true;
+            logUiEvent('voice.timeline.user.view', {});
+        }
+    });
 }
 
 function invalidateRemoteSessionsCache() {
@@ -295,6 +312,8 @@ function clearVoiceTranscript() {
         state.voice.transcriptBuffer = '';
         state.voice.streamingMessage = null;
         state.voice.transcriptsByIndex = {};
+        state.voice.persistedByIndex = {};
+        state.voice.coachTextByIndex = {};
         state.voice.messages = [];
         state.voice.userTranscriptBuffer = '';
         state.voice.userStreamingMessage = null;
@@ -303,8 +322,94 @@ function clearVoiceTranscript() {
         state.voice.lastRealtimeUserTranscriptAt = 0;
         state.voice.lastBrowserUserTranscriptAt = 0;
     }
+    voiceTimelineViewed = false;
     voiceTranscript.dataset.empty = 'true';
     voiceTranscript.innerHTML = '<p class="text-xs text-gray-500">Voice transcripts will appear here once the realtime session begins.</p>';
+}
+
+function readTranscriptValue(map, index) {
+    if (!map) return '';
+    const strKey = String(index);
+    return (map[strKey] || map[index] || '').trim();
+}
+
+function persistUserTranscript(questionIndex, text, options = {}) {
+    const { source } = options;
+    if (!state.sessionId || !Number.isInteger(questionIndex)) {
+        return Promise.resolve();
+    }
+    const clean = (text || '').trim();
+    if (!clean) {
+        return Promise.resolve();
+    }
+    const payload = {
+        question_index: questionIndex,
+        text: clean,
+    };
+    if (source && typeof source === 'string' && source.trim()) {
+        payload.source = source.trim();
+    }
+    return fetch(`/session/${state.sessionId}/voice-transcript`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+    });
+}
+
+function hydrateVoiceTranscriptFromSession(sessionData) {
+    if (!voiceTranscript || !sessionData) {
+        return;
+    }
+
+    const userMap = sessionData.voice_user_text || sessionData.voice_transcripts || {};
+    const coachMap = sessionData.voice_agent_text || {};
+    const questions = sessionData.questions || state.questions || [];
+
+    const indices = new Set();
+    Object.keys(userMap || {}).forEach((key) => {
+        const parsed = Number.parseInt(key, 10);
+        if (!Number.isNaN(parsed)) indices.add(parsed);
+    });
+    Object.keys(coachMap || {}).forEach((key) => {
+        const parsed = Number.parseInt(key, 10);
+        if (!Number.isNaN(parsed)) indices.add(parsed);
+    });
+    for (let i = 0; i < questions.length; i += 1) {
+        indices.add(i);
+    }
+
+    const sorted = Array.from(indices).sort((a, b) => a - b);
+    if (!sorted.length) {
+        return;
+    }
+
+    if (voiceTranscript.dataset.empty === 'true') {
+        voiceTranscript.innerHTML = '';
+        delete voiceTranscript.dataset.empty;
+    }
+
+    sorted.forEach((idx) => {
+        const candidateText = readTranscriptValue(userMap, idx) || readTranscriptValue(sessionData.voice_transcripts || {}, idx);
+        const coachText = readTranscriptValue(coachMap, idx);
+        const question = questions[idx] || null;
+
+        if (candidateText) {
+            const result = appendVoiceMessage('user', candidateText);
+            if (result && state.voice) {
+                state.voice.transcriptsByIndex[idx] = candidateText;
+                state.voice.persistedByIndex[idx] = candidateText;
+                state.voice.messages[result.entryIndex].question = question;
+            }
+        }
+
+        if (coachText) {
+            const result = appendVoiceMessage('agent', coachText);
+            if (result && state.voice) {
+                state.voice.coachTextByIndex[idx] = coachText;
+                state.voice.messages[result.entryIndex].question = question;
+            }
+        }
+    });
 }
 
 function appendVoiceMessage(role, message, options = {}) {
@@ -418,12 +523,16 @@ function finalizeAgentMessage() {
 
     if (finalText) {
         const idx = state.currentQuestionIndex;
-        if (Number.isInteger(idx) && state.sessionId) {
-            fetch(`/session/${state.sessionId}/voice-agent-text`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ question_index: idx, text: finalText })
-            }).catch(() => {});
+        if (Number.isInteger(idx)) {
+            const coachMap = state.voice.coachTextByIndex || (state.voice.coachTextByIndex = {});
+            coachMap[idx] = finalText;
+            if (state.sessionId) {
+                fetch(`/session/${state.sessionId}/voice-agent-text`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ question_index: idx, text: finalText })
+                }).catch(() => {});
+            }
         }
     }
 
@@ -614,9 +723,28 @@ function appendUserTranscriptSegment(text, options = {}) {
 
     const idx = state.currentQuestionIndex;
     if (Number.isInteger(idx)) {
+        const persistedByIndex = state.voice.persistedByIndex || (state.voice.persistedByIndex = {});
         voiceState.userTranscriptBuffer = stream.text;
         if (done) {
             voiceState.transcriptsByIndex[idx] = stream.text;
+            const finalText = (stream.text || '').trim();
+            if (finalText && persistedByIndex[idx] !== finalText) {
+                persistUserTranscript(idx, finalText, { source: stream.source || source })
+                    .then((response) => {
+                        if (response && response.ok === false) {
+                            throw new Error(`HTTP ${response.status}`);
+                        }
+                        persistedByIndex[idx] = finalText;
+                        logUiEvent('voice.timeline.user.append', {
+                            questionIndex: idx,
+                            characters: finalText.length,
+                            source: stream.source || source || 'unknown',
+                        });
+                    })
+                    .catch((err) => {
+                        console.debug('Unable to persist realtime transcript:', err);
+                    });
+            }
         }
     }
 
@@ -1652,6 +1780,7 @@ async function resumeSavedSession(sessionIdOverride = null) {
         setVoiceEnabled(hasQuestions);
         updateVoiceStatus(hasQuestions ? 'Ready for voice coaching' : 'Offline', 'idle');
         clearVoiceTranscript();
+        hydrateVoiceTranscriptFromSession(data);
 
         logUiEvent('session.resume.success', {
             sessionId: state.sessionId,
@@ -1880,12 +2009,18 @@ function displayQuestion(index) {
         const prevIdx = state.currentQuestionIndex;
         if (Number.isInteger(prevIdx)) {
             const t = state.voice.transcriptsByIndex[prevIdx];
-            if (t && state.sessionId) {
-                fetch(`/session/${state.sessionId}/voice-transcript`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ question_index: prevIdx, text: t })
-                }).catch(() => {});
+            if (t) {
+                const persistedByIndex = state.voice.persistedByIndex || (state.voice.persistedByIndex = {});
+                if (t !== persistedByIndex[prevIdx]) {
+                    persistUserTranscript(prevIdx, t, { source: state.voice.lastUserTranscriptSource || 'navigation' })
+                        .then((response) => {
+                            if (response && response.ok === false) {
+                                throw new Error(`HTTP ${response.status}`);
+                            }
+                            persistedByIndex[prevIdx] = t;
+                        })
+                        .catch((err) => console.debug('Transcript persistence on navigation failed:', err));
+                }
             }
         }
     } catch (_) {}
@@ -2054,7 +2189,8 @@ function displayFeedback(evaluation) {
             fetch(`/session/${state.sessionId}`)
                 .then(r => (r.ok ? r.json() : Promise.reject()))
                 .then(data => {
-                    const vt = (data.voice_transcripts && (data.voice_transcripts[String(idx)] || data.voice_transcripts[idx])) || '';
+                    const userMap = data.voice_user_text || {};
+                    const vt = readTranscriptValue(userMap, idx) || readTranscriptValue(data.voice_transcripts || {}, idx);
                     if (vt) {
                         if (feedbackUserTranscriptWrap) feedbackUserTranscriptWrap.classList.remove('hidden');
                         if (feedbackUserTranscript) feedbackUserTranscript.textContent = vt;
@@ -2062,7 +2198,7 @@ function displayFeedback(evaluation) {
                         feedbackUserTranscriptWrap.classList.add('hidden');
                     }
 
-                    const coach = (data.voice_agent_text && (data.voice_agent_text[String(idx)] || data.voice_agent_text[idx])) || '';
+                    const coach = readTranscriptValue(data.voice_agent_text || {}, idx);
                     if (coach) {
                         if (feedbackCoachVoiceWrap) feedbackCoachVoiceWrap.classList.remove('hidden');
                         if (feedbackCoachVoice) feedbackCoachVoice.textContent = coach;
@@ -2226,13 +2362,19 @@ function displaySummary() {
     // Persist transcript for current question if any
     try {
         const currIdx = state.currentQuestionIndex;
-        const t = state.voice.transcriptsByIndex[currIdx];
-        if (t && state.sessionId) {
-            fetch(`/session/${state.sessionId}/voice-transcript`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ question_index: currIdx, text: t })
-            }).catch(() => {});
+        if (Number.isInteger(currIdx)) {
+            const t = state.voice.transcriptsByIndex[currIdx];
+            const persistedByIndex = state.voice.persistedByIndex || (state.voice.persistedByIndex = {});
+            if (t && persistedByIndex[currIdx] !== t) {
+                persistUserTranscript(currIdx, t, { source: state.voice.lastUserTranscriptSource || 'summary' })
+                    .then((response) => {
+                        if (response && response.ok === false) {
+                            throw new Error(`HTTP ${response.status}`);
+                        }
+                        persistedByIndex[currIdx] = t;
+                    })
+                    .catch((err) => console.debug('Transcript persistence before summary failed:', err));
+            }
         }
     } catch (_) {}
 
@@ -2314,6 +2456,7 @@ function buildPerQuestionCards() {
         .then(data => {
             const questions = data.questions || [];
             const evals = (data.per_question && data.per_question.length) ? data.per_question : (data.evaluations || []);
+            const userTexts = data.voice_user_text || {};
             const transcripts = data.voice_transcripts || {};
             const coachTexts = data.voice_agent_text || {};
             cardsHost.innerHTML = '';
@@ -2325,7 +2468,7 @@ function buildPerQuestionCards() {
                 const weaknesses = Array.isArray(ev.weaknesses) ? ev.weaknesses : (ev.weaknesses ? [ev.weaknesses] : []);
                 const why = ev.why_asked || '';
                 const example = ev.example_improvement || '';
-                const t = transcripts[String(i)] || '';
+                const t = readTranscriptValue(userTexts, i) || readTranscriptValue(transcripts, i);
 
                 const card = document.createElement('div');
                 card.className = 'p-4 border border-gray-200 rounded-lg bg-white';
@@ -2372,7 +2515,7 @@ function buildPerQuestionCards() {
                     card.appendChild(tr);
                 }
 
-                const coach = coachTexts[String(i)] || '';
+                const coach = readTranscriptValue(coachTexts, i);
                 if (coach) {
                     const cf = document.createElement('details');
                     cf.className = 'mb-1';
