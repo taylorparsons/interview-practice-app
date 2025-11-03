@@ -100,10 +100,11 @@ When running the UI tests, ensure the server is reachable at `http://localhost:8
 - `./run.sh`: Boots the FastAPI server. Add `--no-reload` to disable auto-reload or `--python 3.11` to select a Python version.
 - `./run_voice.sh`: Same as `run.sh`, but prints realtime voice config details; handy when testing the WebRTC/audio flow exclusively.
 - `./test.sh`: Runs the test suite with `pytest -q`. Use `--health` to ping the running server (`http://localhost:8000` by default) after tests, or override the health-check target with `--url <base_url>`.
-- `./run_usertests.sh`: Installs Helium/Selenium UI dependencies from `requirements-dev.txt` and runs the browser smoke tests in `tests/ui/`. Set `UI_BASE_URL` if the app is not on `http://localhost:8000`. The script writes a Markdown summary to `tests/ui/__artifacts__/usertests_report.md` plus raw logs in `usertests.pytest.log`.
+- `./run_usertests.sh`: Installs Helium/Selenium UI dependencies from `requirements-dev.txt` and runs the browser smoke tests in `tests/ui/`. Set `UI_BASE_URL` if the app is not on `http://localhost:8000`. The script writes a Markdown summary to `tests/ui/__artifacts__/usertests_report.md` plus raw logs in `usertests.pytest.log`, and now includes the realtime voice scenarios from `tests/ui/test_voice_session_flow.py`. For the end-to-end checklist and heuristics behind these flows, see `docs/helium-ui-testing-plan.md`.
 
 ## Contributor Toolkit
 - `references/` contains the shared refactoring and operational playbooks (`advanced_topics.md`, `best_practices.md`, etc.) so engineers can align on safe cleanup patterns while working in the app.
+- `AGENTS.md` documents how the text coach and realtime voice coach coordinate prompts, persona defaults, and session persistence.
 - `scripts/` holds automation that enforces the playbook: `analyze_code.py` surfaces long functions/deep nesting before refactors, and `refactor_code.py` applies targeted AST cleanups.
 - `templates/` packages code/test scaffolds referenced in the playbook. Use them to spin up new helpers, routers, or focused pytest modules that match the repo style.
 - `tests/api/` and `tests/ui/` provide the baseline regression coverage for session flows and front-end persona defaults. Each module includes high-level docstrings explaining the scenarios they guard.
@@ -114,6 +115,7 @@ When running the UI tests, ensure the server is reachable at `http://localhost:8
 - Conversation summaries stream into the transcript panel while audio plays through the embedded `<audio>` element.
 - Use **Stop Voice Session** to release the connection, or restart the interview to reset the voice UI.
 - Voice persona system prompts live at `app/prompts/<persona>/voice_system.txt`; edit these files to update realtime instructions per persona.
+- Consult `AGENTS.md` for a full walkthrough of the realtime voice agent pipeline, from persona selection through instruction assembly and transcript persistence.
 
 ### Voice Turn Detection (VAD) settings
 You can control server-side turn detection behavior via environment variables in `.env`:
@@ -314,8 +316,12 @@ flowchart TD
     E --> J{"Remember" Button\n or Voice Keyword}
     J --> K[(Work History Store)]
     K --> L[Start Voice Session]
-    L --> N[Build Realtime Instructions]
-    N --> M[Realtime Coach]
+    L --> O[WebRTC Voice Session]
+    O --> N[Build Realtime Instructions]
+    N --> P["Voice Agent Config\n(see AGENTS.md)"]
+    P --> M[Realtime Voice Coach]
+    M --> Q[Voice Transcript + Live Feedback]
+    Q --> F
 
     classDef usr fill:#f2ffe6,stroke:#7cc37f,stroke-width:1px;
     classDef sys fill:#e6f0ff,stroke:#6e90ff,stroke-width:1px;
@@ -325,8 +331,8 @@ flowchart TD
     classDef agent fill:#ffe6f2,stroke:#ff6ea9,stroke-width:1px;
 
     class A,E,H,J,L usr;
-    class C,F,G,N sys;
-    class D,I ui;
+    class C,F,G,N,P sys;
+    class D,I,O,Q ui;
     class K store;
     class B decision;
     class M agent;
@@ -336,5 +342,5 @@ Notes
 - `<persona>` is one of `ruthless | helpful | discovery`.
 - If a prompt file is missing, the app falls back to built‑in defaults.
 - The voice session does not use the above per‑task files; it composes a single instruction string from the selected persona plus the top matches from your work‑history store.
-- Realtime instructions combine the persona prompt and retrieved work-history snippets before reaching the realtime coach.
+- Voice agent orchestration, including how instructions and session context are assembled, is covered in `AGENTS.md`.
 - Colors indicate interaction type: green for user actions, blue for system processing, amber for UI display, violet for stored data, gold for decision points, and pink for the realtime agent.

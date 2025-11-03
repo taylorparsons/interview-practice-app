@@ -49,9 +49,10 @@ Use this playbook when operating or extending the interview-practice application
    - Refactor incrementally: split lengthy request handlers, encapsulate voice payload construction, tighten logging helpers.
    - Keep persona prompts and knowledge-store interactions behaviorally identical; update tests if signatures shift.
 4. **Verify**
-   - Run targeted suites (`pytest tests/api`, `pytest tests/ui`) then the full `pytest` run.
-   - Manually validate UI flows: upload resume/JD, generate questions, run a coaching session, start realtime voice via `./run_voice.sh`.
-   - Capture before/after metrics (function length, complexity, logging coverage) when meaningful.
+- Run targeted suites (`pytest tests/api`, `pytest tests/ui`) then the full `pytest` run.
+- Manually validate UI flows: upload resume/JD, generate questions, run a coaching session, start realtime voice via `./run_voice.sh`.
+- Exercise the Helium regression suite (`./run_usertests.sh`) to cover persona defaults, landing experience, and realtime voice journeys; see `docs/realtime-voice-ui-test-plan.md` for scenario details.
+- Capture before/after metrics (function length, complexity, logging coverage) when meaningful.
 5. **Document & Handoff**
    - Update this playbook, `README.md`, and relevant docs in `docs/` for new flows or dependencies.
    - Summarize refactors, tests, and known follow-ups in PR descriptions or release notes.
@@ -84,6 +85,7 @@ Use this playbook when operating or extending the interview-practice application
 - **Logging**: `app/logging_config.py` + `app/logging_context.py` enable structured logs with session IDs (see `LOGGING_SEQUENCE.md`).
 - **Frontend assets**: `app/static/js/app.js`, `app/templates/*.html`, `app/static/css/` drive the coaching UI and voice UX.
 - **Tests**: `tests/api/` covers REST endpoints; `tests/ui/` houses UI checks; expand coverage when refactoring major flows.
+- **Realtime voice test plan**: `docs/realtime-voice-ui-test-plan.md` plus `tests/ui/test_voice_session_flow.py` document and enforce the voice session behaviours. Update both when altering voice UX.
 
 ## Safety & Quality Gates
 - ✅ `pytest` (and targeted `tests/api` / `tests/ui`) pass locally before and after refactors.
@@ -94,6 +96,7 @@ Use this playbook when operating or extending the interview-practice application
 - ✅ Refactors stay behavior-preserving; feature additions land in separate commits or PRs.
 - ✅ `python3 scripts/analyze_code.py app --recursive` runs cleanly with no new findings introduced by your change; investigate and resolve any new issues before handoff.
 - ✅ Capture analyzer output in version control (commit or PR notes) with a brief explanation of why it was run and any new observations discovered.
+- ✅ `./run_usertests.sh` completes, confirming Helium user journeys (including realtime voice start/stop, remember, and failure handling) remain green.
 
 ## Decision Support
 - **Should I Refactor?** Use the decision tree in `templates/refactoring_plan.md`: confirm tests exist, identify concrete pain (performance, readability, defects), and weigh the risk of touching async handlers, WebRTC flows, or FAISS state.

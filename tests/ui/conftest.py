@@ -15,6 +15,8 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 
+from tests.ui.helpers.voice import VoiceTestController
+
 ARTIFACTS_DIR = Path(__file__).parent / "__artifacts__"
 
 
@@ -122,6 +124,17 @@ def flow_capture(request: pytest.FixtureRequest) -> FlowCapture:
             "flow_capture fixture requires the browser fixture; add 'browser' to the test signature."
         )
     return capture
+
+
+@pytest.fixture
+def voice_test_controller(browser) -> VoiceTestController:
+    """Inject realtime voice stubs for UI tests that exercise voice controls."""
+    controller = VoiceTestController(browser)
+    controller.install()
+    try:
+        yield controller
+    finally:
+        controller.teardown()
 
 
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)

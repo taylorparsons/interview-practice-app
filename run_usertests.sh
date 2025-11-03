@@ -77,7 +77,37 @@ TEST_META = {
         "proves": "Resume and job description upload controls render, so a candidate can begin the practice flow.",
         "why": "If this UI regresses, users cannot start the interview journey and churn immediately.",
         "cta": "Investigate recent UI/layout changes and restore the upload form parity."
-    }
+    },
+    "tests.ui.test_coach_persona_default::test_default_discovery_coach_selected": {
+        "journey": "Coach persona defaults",
+        "proves": "Discovery persona is preselected and the onboarding upload flow transitions into the interview view.",
+        "why": "Wrong defaults or a broken transition will confuse candidates and stall their preparation.",
+        "cta": "Restore the default persona wiring or adjust fixtures if the UX intentionally changed."
+    },
+    "tests.ui.test_voice_session_flow::test_voice_session_happy_path": {
+        "journey": "Realtime voice kickoff",
+        "proves": "Starting a voice session updates status indicators and streams agent guidance into the transcript panel.",
+        "why": "If voice bootstrap breaks, candidates lose the signature realtime coaching experience.",
+        "cta": "Inspect recent WebRTC or fetch changes and ensure the coach can reach 'Live' status."
+    },
+    "tests.ui.test_voice_session_flow::test_voice_session_remember_and_persona": {
+        "journey": "Voice transcript persistence",
+        "proves": "Remembering a transcript snippet and switching personas update both storage and UI feedback.",
+        "why": "If memorize calls or persona persistence fail, voice practice no longer reinforces user prompts.",
+        "cta": "Verify storage endpoints and localStorage writes still complete under voice interaction."
+    },
+    "tests.ui.test_voice_session_flow::test_voice_session_error_recovery": {
+        "journey": "Voice failure handling",
+        "proves": "Session creation errors surface to the user and controls remain usable for retries.",
+        "why": "Silent failures trap candidates without feedback and block retries during outages.",
+        "cta": "Confirm error messaging and button states respond to upstream failures."
+    },
+    "tests.ui.test_voice_session_flow::test_voice_session_manual_stop": {
+        "journey": "Voice teardown",
+        "proves": "Manual stop closes realtime channels, resets controls, and readies the UI for another session.",
+        "why": "Lingering connections or stale controls would drain resources and confuse candidates looping sessions.",
+        "cta": "Ensure teardown logic restores default state and closes peer/data channels."
+    },
 }
 
 DEFAULT_META = {

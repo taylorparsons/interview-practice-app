@@ -29,6 +29,7 @@
    - Confirm layout toggles (compact/split) by checking for expected DOM markers via `S(...)` selectors.
 3. **Coaching Configuration**
    - Exercise coaching level dropdown, persist selection, refresh page, and verify Helium reads back the stored value.
+   - Cover realtime voice session controls end-to-end (start, transcript rendering, remember, stop) via `tests/ui/test_voice_session_flow.py`; implementation details live in `docs/realtime-voice-ui-test-plan.md`.
 
 ## Phase 3: General Chat Scenarios
 1. **Workspace Switching**

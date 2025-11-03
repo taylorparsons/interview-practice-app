@@ -1,12 +1,17 @@
 # Helium User Test Report
 
-- **Generated:** 2025-10-15 22:48:11Z
-- **Status:** PASSED (1/1 passing)
+- **Generated:** 2025-11-03 20:25:43Z
+- **Status:** PASSED (6/6 passing)
 - **Log:** `/Volumes/T9/Users/taylorparsons/code/interview-practice-app/tests/ui/__artifacts__/usertests.pytest.log`
 
-| Result | Test | Customer Journey | What It Proves | Why It Matters | Call To Action |
-|--------|------|------------------|----------------|----------------|----------------|
-| PASSED | `tests.ui.test_homepage_smoke::test_homepage_upload_section_visible` | Candidate landing experience | Resume and job description upload controls render, so a candidate can begin the practice flow. | If this UI regresses, users cannot start the interview journey and churn immediately. | Investigate recent UI/layout changes and restore the upload form parity. |
+| Result | Test | Customer Journey | What It Proves | Why It Matters | Call To Action | Artifacts |
+|--------|------|------------------|----------------|----------------|----------------|-----------|
+| PASSED | `tests.ui.test_coach_persona_default::test_default_discovery_coach_selected` | Coach persona defaults | Discovery persona is preselected and the onboarding upload flow transitions into the interview view. | Wrong defaults or a broken transition will confuse candidates and stall their preparation. | Restore the default persona wiring or adjust fixtures if the UX intentionally changed. | `/Volumes/T9/Users/taylorparsons/code/interview-practice-app/tests/ui/__artifacts__/test_default_discovery_coach_selected_20251103-122459` |
+| PASSED | `tests.ui.test_homepage_smoke::test_homepage_upload_section_visible` | Candidate landing experience | Resume and job description upload controls render, so a candidate can begin the practice flow. | If this UI regresses, users cannot start the interview journey and churn immediately. | Investigate recent UI/layout changes and restore the upload form parity. | `/Volumes/T9/Users/taylorparsons/code/interview-practice-app/tests/ui/__artifacts__/test_homepage_upload_section_visible_20251103-122508` |
+| PASSED | `tests.ui.test_voice_session_flow::test_voice_session_happy_path` | Realtime voice kickoff | Starting a voice session updates status indicators and streams agent guidance into the transcript panel. | If voice bootstrap breaks, candidates lose the signature realtime coaching experience. | Inspect recent WebRTC or fetch changes and ensure the coach can reach 'Live' status. | `/Volumes/T9/Users/taylorparsons/code/interview-practice-app/tests/ui/__artifacts__/test_voice_session_happy_path_20251103-122509` |
+| PASSED | `tests.ui.test_voice_session_flow::test_voice_session_remember_and_persona` | Voice transcript persistence | Remembering a transcript snippet and switching personas update both storage and UI feedback. | If memorize calls or persona persistence fail, voice practice no longer reinforces user prompts. | Verify storage endpoints and localStorage writes still complete under voice interaction. | `/Volumes/T9/Users/taylorparsons/code/interview-practice-app/tests/ui/__artifacts__/test_voice_session_remember_and_persona_20251103-122516` |
+| PASSED | `tests.ui.test_voice_session_flow::test_voice_session_error_recovery` | Voice failure handling | Session creation errors surface to the user and controls remain usable for retries. | Silent failures trap candidates without feedback and block retries during outages. | Confirm error messaging and button states respond to upstream failures. | `/Volumes/T9/Users/taylorparsons/code/interview-practice-app/tests/ui/__artifacts__/test_voice_session_error_recovery_20251103-122524` |
+| PASSED | `tests.ui.test_voice_session_flow::test_voice_session_manual_stop` | Voice teardown | Manual stop closes realtime channels, resets controls, and readies the UI for another session. | Lingering connections or stale controls would drain resources and confuse candidates looping sessions. | Ensure teardown logic restores default state and closes peer/data channels. | `/Volumes/T9/Users/taylorparsons/code/interview-practice-app/tests/ui/__artifacts__/test_voice_session_manual_stop_20251103-122535` |
 
 ## Notes
 - All documented customer journeys exercised successfully. Monitor this report for regressions before releases.
