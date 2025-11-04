@@ -7,6 +7,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 import numpy as np
 
 from openai import OpenAI
+from app.utils.import_helpers import gather_import_files, read_import_file
 
 logger = logging.getLogger(__name__)
 
@@ -34,29 +35,39 @@ class FaissDoc:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass
+class FaissStoreConfig:
+    """Configuration bundle for FaissVectorStore construction."""
+    index_path: Path
+    meta_path: Path
+    embedding_model: str
+    api_key: str
+    legacy_json: Optional[Path] = None
+
+
 class FaissVectorStore:
     """Embeddings-based vector store backed by FAISS (cosine similarity).
 
     Persists FAISS index to `index_path` and document metadata to `meta_path`.
     """
 
-    def __init__(self, index_path: Path, meta_path: Path, embedding_model: str, api_key: str, legacy_json: Optional[Path] = None):
+    def __init__(self, config: FaissStoreConfig):
         """Initialise the FAISS-backed store with persistence and embedding config."""
-        self.index_path = Path(index_path)
-        self.meta_path = Path(meta_path)
-        self.embedding_model = embedding_model
-        self.client = OpenAI(api_key=api_key) if api_key else None
+        self.index_path = Path(config.index_path)
+        self.meta_path = Path(config.meta_path)
+        self.embedding_model = config.embedding_model
+        self.client = OpenAI(api_key=config.api_key) if config.api_key else None
         self.docs: List[FaissDoc] = []
         self.dim: Optional[int] = None
         self.count: int = 0
         self.meta: Dict[str, Any] = {
             "engine": "faiss",
             "version": 1,
-            "embedding_model": embedding_model,
+            "embedding_model": config.embedding_model,
         }
 
         self._index = None  # type: ignore
-        self._load_or_init(legacy_json)
+        self._load_or_init(config.legacy_json)
 
     # ---------- Internal: persistence ----------
     def _load_or_init(self, legacy_json: Optional[Path]) -> None:
@@ -196,72 +207,15 @@ class FaissVectorStore:
         if not path.exists():
             raise FileNotFoundError(str(path))
 
-        files: List[Path]
-        if path.is_dir():
-            files = sorted([p for p in path.rglob("*") if p.suffix.lower() in {".txt", ".md", ".json", ".jsonl"}])
-        else:
-            files = [path]
-
+        files = gather_import_files(path)
         total = 0
-        for f in files:
+        for file_path in files:
             try:
-                if f.suffix.lower() in {".txt", ".md"}:
-                    text = f.read_text(encoding="utf-8", errors="ignore")
-                    chunks = [c.strip() for c in text.split("\n\n") if c.strip()]
-                    total += self.add_texts(chunks, metadatas=[{"source": str(f)} for _ in chunks])
-                elif f.suffix.lower() == ".jsonl":
-                    batch_texts: List[str] = []
-                    batch_meta: List[Dict[str, Any]] = []
-                    with f.open("r", encoding="utf-8", errors="ignore") as fh:
-                        for line in fh:
-                            line = line.strip()
-                            if not line:
-                                continue
-                            try:
-                                obj = json.loads(line)
-                                text = obj.get("text") or obj.get("content") or obj.get("chunk") or ""
-                                meta = obj.get("metadata") or {k: v for k, v in obj.items() if k not in {"text", "content", "chunk"}}
-                                if text:
-                                    batch_texts.append(text)
-                                    batch_meta.append({**meta, "source": str(f)})
-                            except Exception:
-                                continue
-                    if batch_texts:
-                        total += self.add_texts(batch_texts, batch_meta)
-                elif f.suffix.lower() == ".json":
-                    data = json.loads(f.read_text(encoding="utf-8", errors="ignore"))
-                    chunks: List[str] = []
-                    metas: List[Dict[str, Any]] = []
-                    if isinstance(data, list):
-                        for item in data:
-                            if isinstance(item, str):
-                                chunks.append(item)
-                                metas.append({"source": str(f)})
-                            elif isinstance(item, dict):
-                                text = item.get("text") or item.get("content") or item.get("chunk") or ""
-                                if text:
-                                    chunks.append(text)
-                                    meta = item.get("metadata") or {k: v for k, v in item.items() if k not in {"text", "content", "chunk", "metadata"}}
-                                    meta["source"] = str(f)
-                                    metas.append(meta)
-                    elif isinstance(data, dict):
-                        if isinstance(data.get("chunks"), list):
-                            for c in data.get("chunks"):
-                                if isinstance(c, str):
-                                    chunks.append(c)
-                                    metas.append({"source": str(f)})
-                                elif isinstance(c, dict):
-                                    txt = c.get("text") or c.get("content") or c.get("chunk") or ""
-                                    if txt:
-                                        chunks.append(txt)
-                                        meta = c.get("metadata") or {k: v for k, v in c.items() if k not in {"text", "content", "chunk", "metadata"}}
-                                        meta["source"] = str(f)
-                                        metas.append(meta)
-                    if chunks:
-                        total += self.add_texts(chunks, metas)
+                texts, metas = read_import_file(file_path)
+                if texts:
+                    total += self.add_texts(texts, metas)
             except Exception:
-                logger.exception("Failed importing from %s", f)
-
+                logger.exception("Failed importing from %s", file_path)
         return total
 
     def stats(self) -> Dict[str, Any]:
@@ -286,7 +240,11 @@ def get_work_history_store(legacy_json_path: Path) -> FaissVectorStore:
     # Late import to avoid circular import to config
     from app.config import OPENAI_EMBEDDING_MODEL, OPENAI_API_KEY
 
-    store = FaissVectorStore(index_path=index_path, meta_path=meta_path,
-                             embedding_model=OPENAI_EMBEDDING_MODEL, api_key=OPENAI_API_KEY,
-                             legacy_json=legacy_json_path)
-    return store
+    config = FaissStoreConfig(
+        index_path=index_path,
+        meta_path=meta_path,
+        embedding_model=OPENAI_EMBEDDING_MODEL,
+        api_key=OPENAI_API_KEY,
+        legacy_json=legacy_json_path,
+    )
+    return FaissVectorStore(config)

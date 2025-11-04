@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any, Dict, List, Optional
 
 
@@ -225,6 +226,9 @@ _INSTALL_STUBS_SCRIPT = """
     getFlags() {
       return Object.assign({}, state.flags);
     },
+    channelReady() {
+      return Boolean(state.channel && state.channel.readyState === 'open');
+    },
     teardown() {
       window.fetch = original.fetch;
       if (original.RTCPeerConnection) {
@@ -319,3 +323,22 @@ class VoiceTestController:
             "return window.__voiceTest ? window.__voiceTest.getFlags() : {};"
         )
         return data or {}
+
+    def wait_for_data_channel_open(
+        self, timeout_secs: float = 5.0, poll_interval: float = 0.1
+    ) -> bool:
+        """Retry triggering the data channel open event until it succeeds or times out."""
+        deadline = time.time() + timeout_secs
+        while time.time() < deadline:
+            if self.trigger_data_channel_open():
+                return True
+            time.sleep(poll_interval)
+        return False
+
+    def is_data_channel_ready(self) -> bool:
+        """Check whether the stubbed data channel reports an open readyState."""
+        return bool(
+            self.driver.execute_script(
+                "return window.__voiceTest ? window.__voiceTest.channelReady() : false;"
+            )
+        )

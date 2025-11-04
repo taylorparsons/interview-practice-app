@@ -36,30 +36,34 @@ class RedactFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:  # noqa: D401
         """Redact known secret patterns from the log record."""
         try:
-            msg = record.msg
-            args = record.args
-
-            if isinstance(msg, str):
-                for needle, repl in self.REDACTIONS:
-                    if needle in msg:
-                        msg = msg.replace(needle, repl)
-                record.msg = msg
-
-            if args:
-                changed = False
-                new_args = []
-                for arg in args:
-                    if isinstance(arg, str):
-                        redacted = arg
-                        for needle, repl in self.REDACTIONS:
-                            if needle in redacted:
-                                redacted = redacted.replace(needle, repl)
-                                changed = True
-                        new_args.append(redacted)
-                    else:
-                        new_args.append(arg)
-                if changed:
-                    record.args = tuple(new_args)
+            record.msg = self._redact_value(record.msg)
+            if record.args:
+                record.args = self._redact_args(record.args)
         except Exception:
             pass
         return True
+
+    def _redact_args(self, args):
+        """Apply redaction to common arg container types."""
+        if isinstance(args, dict):
+            return {
+                key: self._redact_value(value)
+                if isinstance(value, str)
+                else value
+                for key, value in args.items()
+            }
+        if isinstance(args, list):
+            return [self._redact_value(arg) if isinstance(arg, str) else arg for arg in args]
+        if isinstance(args, tuple):
+            return tuple(self._redact_value(arg) if isinstance(arg, str) else arg for arg in args)
+        return self._redact_value(args) if isinstance(args, str) else args
+
+    def _redact_value(self, value):
+        """Redact a single value if it contains secret markers."""
+        if not isinstance(value, str):
+            return value
+        result = value
+        for needle, replacement in self.REDACTIONS:
+            if needle in result:
+                result = result.replace(needle, replacement)
+        return result

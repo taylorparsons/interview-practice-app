@@ -68,6 +68,41 @@ def _coach_display_name(persona: Optional[str]) -> Optional[str]:
     }
     return mapping.get((persona or "").lower() or "", None)
 
+
+_EXAMPLE_ANSWER_RESPONSES: List[tuple[tuple[str, ...], str]] = [
+    (
+        ("experience", "background"),
+        """I have over 5 years of experience in software development with a focus on full-stack web applications. My background includes working at both startups and established companies where I've contributed to all stages of the software development lifecycle. In my most recent role at TechCorp, I led the development of a customer-facing portal that increased customer engagement by 35% and reduced support tickets by 20%. Prior to that, I worked at InnovateX where I built RESTful APIs that improved system performance by 40%. My technical expertise includes JavaScript/TypeScript, React, Node.js, Python, and SQL databases.""",
+    ),
+    (
+        ("strengths",),
+        """My greatest professional strengths include technical problem-solving, effective communication, and adaptive learning. When faced with complex technical challenges, I methodically break them down into manageable components and systematically address each one. This approach helped me resolve a critical performance bottleneck in our production system that had been affecting users for weeks. Additionally, I excel at communicating technical concepts to non-technical stakeholders, which has been valuable when working with product managers and business teams. Lastly, I prioritize continuous learning to stay current with emerging technologies and best practices, regularly dedicating time to explore new tools and techniques that could benefit our projects.""",
+    ),
+    (
+        ("weaknesses",),
+        """One area I've been working to improve is delegating responsibilities more effectively. In the past, I would take on too many tasks myself, which sometimes led to burnout. I've addressed this by implementing a structured approach to task management and team coordination, focusing on identifying team members' strengths and aligning tasks accordingly. I've also been working on balancing technical perfectionism with practical deadlines, recognizing when something is 'good enough' for an initial release versus when perfection is truly necessary. Through regular feedback and reflection, I've made significant progress in both areas, which has improved both my productivity and work-life balance.""",
+    ),
+    (
+        ("interest", "why"),
+        """I'm particularly interested in this position because it aligns perfectly with my technical skills and career aspirations. The opportunity to work on innovative solutions that directly impact users is exciting to me. I've been following your company's growth and am impressed by your commitment to both technical excellence and user experience. The job description mentioned responsibilities around optimizing application performance and implementing new features, which are areas where I have demonstrated success in previous roles. Additionally, your company culture of continuous learning and collaborative problem-solving resonates with my personal work values. I believe my background in similar technologies and experience solving comparable challenges would allow me to make meaningful contributions quickly.""",
+    ),
+    (
+        ("five years", "future"),
+        """In five years, I envision myself having deepened my technical expertise while also growing my leadership skills. I aim to become a senior developer who not only contributes high-quality code but also mentors junior team members and influences technical decisions. I'm particularly interested in continuing to specialize in distributed systems while gaining more experience with cloud architecture and scalability challenges. I also plan to further develop my project management skills to potentially move into a technical lead role where I can help bridge the gap between technical implementation and business objectives. Throughout this journey, I'll remain committed to continuous learning and staying current with emerging technologies and methodologies.""",
+    ),
+]
+
+_EXAMPLE_ANSWER_DEFAULT = """Based on my experience and qualifications, I would approach this by leveraging my technical skills and domain knowledge. I believe in combining theoretical understanding with practical implementation, always focusing on delivering value while maintaining code quality and system performance. When facing challenges in this area, I rely on systematic problem-solving, collaboration with team members, and staying current with industry best practices. In my previous roles, I've successfully handled similar situations by breaking down complex problems into manageable components, prioritizing user needs, and implementing solutions that are both robust and scalable. I'm always eager to learn and adapt, which I believe is essential in our rapidly evolving field."""
+
+
+def _example_answer_fallback(question: Optional[str]) -> str:
+    """Provide a canned example answer when the agent cannot produce one."""
+    prompt = (question or "").lower()
+    for keywords, response in _EXAMPLE_ANSWER_RESPONSES:
+        if any(keyword in prompt for keyword in keywords):
+            return response
+    return _EXAMPLE_ANSWER_DEFAULT
+
 # Initialize FastAPI
 app = FastAPI(title="Interview Practice App")
 
@@ -711,28 +746,8 @@ async def generate_example_answer(request: ExampleAnswerRequest):
             session["agent"] = None
             _persist_session_state(session_id, session)
 
-    question = request.question.lower()
     log_event("example.fallback", session_id=session_id)
-    
-    if "experience" in question or "background" in question:
-        answer = """I have over 5 years of experience in software development with a focus on full-stack web applications. My background includes working at both startups and established companies where I've contributed to all stages of the software development lifecycle. In my most recent role at TechCorp, I led the development of a customer-facing portal that increased customer engagement by 35% and reduced support tickets by 20%. Prior to that, I worked at InnovateX where I built RESTful APIs that improved system performance by 40%. My technical expertise includes JavaScript/TypeScript, React, Node.js, Python, and SQL databases."""
-    
-    elif "strengths" in question:
-        answer = """My greatest professional strengths include technical problem-solving, effective communication, and adaptive learning. When faced with complex technical challenges, I methodically break them down into manageable components and systematically address each one. This approach helped me resolve a critical performance bottleneck in our production system that had been affecting users for weeks. Additionally, I excel at communicating technical concepts to non-technical stakeholders, which has been valuable when working with product managers and business teams. Lastly, I prioritize continuous learning to stay current with emerging technologies and best practices, regularly dedicating time to explore new tools and techniques that could benefit our projects."""
-    
-    elif "weaknesses" in question:
-        answer = """One area I've been working to improve is delegating responsibilities more effectively. In the past, I would take on too many tasks myself, which sometimes led to burnout. I've addressed this by implementing a structured approach to task management and team coordination, focusing on identifying team members' strengths and aligning tasks accordingly. I've also been working on balancing technical perfectionism with practical deadlines, recognizing when something is 'good enough' for an initial release versus when perfection is truly necessary. Through regular feedback and reflection, I've made significant progress in both areas, which has improved both my productivity and work-life balance."""
-    
-    elif "interest" in question or "why" in question:
-        answer = """I'm particularly interested in this position because it aligns perfectly with my technical skills and career aspirations. The opportunity to work on innovative solutions that directly impact users is exciting to me. I've been following your company's growth and am impressed by your commitment to both technical excellence and user experience. The job description mentioned responsibilities around optimizing application performance and implementing new features, which are areas where I have demonstrated success in previous roles. Additionally, your company culture of continuous learning and collaborative problem-solving resonates with my personal work values. I believe my background in similar technologies and experience solving comparable challenges would allow me to make meaningful contributions quickly."""
-    
-    elif "five years" in question or "future" in question:
-        answer = """In five years, I envision myself having deepened my technical expertise while also growing my leadership skills. I aim to become a senior developer who not only contributes high-quality code but also mentors junior team members and influences technical decisions. I'm particularly interested in continuing to specialize in distributed systems while gaining more experience with cloud architecture and scalability challenges. I also plan to further develop my project management skills to potentially move into a technical lead role where I can help bridge the gap between technical implementation and business objectives. Throughout this journey, I'll remain committed to continuous learning and staying current with emerging technologies and methodologies."""
-    
-    else:
-        answer = """Based on my experience and qualifications, I would approach this by leveraging my technical skills and domain knowledge. I believe in combining theoretical understanding with practical implementation, always focusing on delivering value while maintaining code quality and system performance. When facing challenges in this area, I rely on systematic problem-solving, collaboration with team members, and staying current with industry best practices. In my previous roles, I've successfully handled similar situations by breaking down complex problems into manageable components, prioritizing user needs, and implementing solutions that are both robust and scalable. I'm always eager to learn and adapt, which I believe is essential in our rapidly evolving field."""
-    
-    return {"answer": answer}
+    return {"answer": _example_answer_fallback(request.question)}
 
 
 @app.get("/session/{session_id}")
@@ -1194,48 +1209,63 @@ def _truncate_text(text: str, limit: int = 1200) -> str:
     return f"{text[: limit - 3].rstrip()}..."
 
 
+def _voice_question_plan(session: Dict[str, Any]) -> tuple[str, str]:
+    """Derive the first question and bullet list used in voice prompts."""
+    questions: List[str] = session.get("questions") or []
+    first_question = questions[0] if questions else "Tell me about yourself."
+    bullets = "\n".join(f"- {q}" for q in questions[:5]) or "- Ask situational and behavioral questions tailored to the role."
+    return first_question, bullets
+
+
+def _voice_document_excerpts(session: Dict[str, Any]) -> tuple[str, str]:
+    """Collect truncated resume and job description excerpts."""
+    resume_excerpt = _truncate_text(session.get("resume_text", ""), 1500)
+    job_desc_excerpt = _truncate_text(session.get("job_desc_text", ""), 1500)
+    return resume_excerpt, job_desc_excerpt
+
+
+def _voice_persona_slug(session: Dict[str, Any], persona: Optional[str]) -> str:
+    """Resolve the persona slug for the voice prompt."""
+    return (persona or session.get("coach_persona") or "discovery").lower()
+
+
+def _voice_agent_name_line(agent_name: Optional[str]) -> str:
+    """Provide the persona-aware agent introduction line."""
+    return f"You are the interview coach named '{(agent_name or 'Coach')}'.".strip()
+
+
+def _collect_work_history_snippets(session_id: str, query: str) -> List[str]:
+    """Fetch relevant work-history snippets, logging telemetry for visibility."""
+    snippets: List[str] = []
+    try:
+        store = _get_work_history_store()
+        log_event("knowledge.search.start", session_id=session_id, query=query)
+        results = store.search(query, k=5)
+        log_event("knowledge.search.end", session_id=session_id, matches=len(results))
+        for record in results:
+            snippet = _truncate_text(record.get("text") or "", 240)
+            if snippet:
+                snippets.append(f"- {snippet}")
+    except Exception:
+        log_event("knowledge.search.error", level="exception", session_id=session_id)
+    return snippets
+
+
 def _build_voice_instructions(session_id: str, session: Dict[str, Any], agent_name: Optional[str] = None, persona: Optional[str] = None) -> str:
     """Create instructions for the realtime voice agent based on session context.
 
     Prepends the same system-level coach persona used by the text agent to
     keep behavior consistent across text and voice.
     """
-    questions: List[str] = session.get("questions") or []
-    first_question = questions[0] if questions else "Tell me about yourself."
-    question_bullets = "\n".join(f"- {q}" for q in questions[:5]) or "- Ask situational and behavioral questions tailored to the role."
-    resume_excerpt = _truncate_text(session.get("resume_text", ""), 1500)
-    job_desc_excerpt = _truncate_text(session.get("job_desc_text", ""), 1500)
-
-    # Retrieve top relevant work history snippets from local knowledge store
-    relevant_snippets: List[str] = []
-    try:
-        store = _get_work_history_store()
-        # Use the first question as the query; this keeps results targeted
-        query = first_question or "Interview practice"
-        log_event(
-            "knowledge.search.start",
-            session_id=session_id,
-            query=query,
-        )
-        results = store.search(query, k=5)
-        log_event(
-            "knowledge.search.end",
-            session_id=session_id,
-            matches=len(results),
-        )
-        for r in results:
-            snippet = _truncate_text(r.get("text") or "", 240)
-            if snippet:
-                relevant_snippets.append(f"- {snippet}")
-    except Exception:
-        log_event("knowledge.search.error", level="exception", session_id=session_id)
-        relevant_snippets = []
-
-    persona_slug = persona or session.get("coach_persona") or "discovery"
+    first_question, question_bullets = _voice_question_plan(session)
+    resume_excerpt, job_desc_excerpt = _voice_document_excerpts(session)
+    persona_slug = _voice_persona_slug(session, persona)
     base_prompt = get_voice_system_prompt(persona_slug)
-    name_line = f"You are the interview coach named '{(agent_name or 'Coach')}'.".strip()
+    name_line = _voice_agent_name_line(agent_name)
 
-    snippets_block = "\n".join(relevant_snippets) if relevant_snippets else "- (No stored work-history snippets found)"
+    query = first_question or "Interview practice"
+    snippets = _collect_work_history_snippets(session_id, query)
+    snippets_block = "\n".join(snippets) if snippets else "- (No stored work-history snippets found)"
 
     instructions = f"""
 {base_prompt}

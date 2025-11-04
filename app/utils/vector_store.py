@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from app.utils.import_helpers import gather_import_files, read_import_file
+
 logger = logging.getLogger(__name__)
 
 
@@ -208,80 +210,19 @@ class LexicalVectorStore:
     # ---------- Import helpers ----------
     def import_path(self, path: Path) -> int:
         """Import supported file formats from the given path into the store."""
-        """Import chunks from a directory or file.
-
-        Supported:
-        - .txt / .md: each blank-line separated paragraph as a chunk
-        - .jsonl: each line is a JSON object; use 'text' or 'content' fields
-        - .json: array of {text, metadata} or object with 'chunks': [...]
-        """
         path = Path(path)
         if not path.exists():
             raise FileNotFoundError(str(path))
 
-        files: List[Path]
-        if path.is_dir():
-            files = sorted([p for p in path.rglob("*") if p.suffix.lower() in {".txt", ".md", ".json", ".jsonl"}])
-        else:
-            files = [path]
-
+        files = gather_import_files(path)
         total = 0
-        for f in files:
+        for file_path in files:
             try:
-                if f.suffix.lower() in {".txt", ".md"}:
-                    text = f.read_text(encoding="utf-8", errors="ignore")
-                    chunks = [c.strip() for c in text.split("\n\n") if c.strip()]
-                    total += self.add_texts(chunks, metadatas=[{"source": str(f)} for _ in chunks])
-                elif f.suffix.lower() == ".jsonl":
-                    added = 0
-                    with f.open("r", encoding="utf-8", errors="ignore") as fh:
-                        for line in fh:
-                            line = line.strip()
-                            if not line:
-                                continue
-                            try:
-                                obj = json.loads(line)
-                                text = obj.get("text") or obj.get("content") or obj.get("chunk") or ""
-                                meta = obj.get("metadata") or {k: v for k, v in obj.items() if k not in {"text", "content", "chunk"}}
-                                if text:
-                                    added += self.add_texts([text], metadatas=[{**meta, "source": str(f)}])
-                            except Exception:
-                                continue
-                    total += added
-                elif f.suffix.lower() == ".json":
-                    data = json.loads(f.read_text(encoding="utf-8", errors="ignore"))
-                    chunks: List[str] = []
-                    metas: List[Dict[str, Any]] = []
-                    if isinstance(data, list):
-                        for item in data:
-                            if isinstance(item, str):
-                                chunks.append(item)
-                                metas.append({"source": str(f)})
-                            elif isinstance(item, dict):
-                                text = item.get("text") or item.get("content") or item.get("chunk") or ""
-                                if text:
-                                    chunks.append(text)
-                                    meta = item.get("metadata") or {k: v for k, v in item.items() if k not in {"text", "content", "chunk", "metadata"}}
-                                    meta["source"] = str(f)
-                                    metas.append(meta)
-                    elif isinstance(data, dict):
-                        # look for 'chunks'
-                        if isinstance(data.get("chunks"), list):
-                            for c in data.get("chunks"):
-                                if isinstance(c, str):
-                                    chunks.append(c)
-                                    metas.append({"source": str(f)})
-                                elif isinstance(c, dict):
-                                    txt = c.get("text") or c.get("content") or c.get("chunk") or ""
-                                    if txt:
-                                        chunks.append(txt)
-                                        meta = c.get("metadata") or {k: v for k, v in c.items() if k not in {"text", "content", "chunk", "metadata"}}
-                                        meta["source"] = str(f)
-                                        metas.append(meta)
-                    if chunks:
-                        total += self.add_texts(chunks, metas)
+                texts, metas = read_import_file(file_path)
+                if texts:
+                    total += self.add_texts(texts, metas)
             except Exception:
-                logger.exception("Failed importing from %s", f)
+                logger.exception("Failed importing from %s", file_path)
 
         return total
 

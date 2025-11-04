@@ -56,7 +56,7 @@ def test_voice_session_happy_path(browser, flow_capture, voice_test_controller: 
     _wait_for_start_voice_enabled()
     click(Button("Start Voice Session"))
     _wait_for_text(lambda: S("#voice-status").web_element.text, ("Connecting", "Live"), 10)
-    assert voice_test_controller.trigger_data_channel_open(), "Expected data channel to open"
+    assert voice_test_controller.wait_for_data_channel_open(timeout_secs=10), "Expected data channel to open"
 
     _wait_for_text(lambda: S("#voice-status").web_element.text, "Live", 10)
 
@@ -85,7 +85,7 @@ def test_voice_session_remember_and_persona(browser, flow_capture, voice_test_co
 
     _wait_for_start_voice_enabled()
     click(Button("Start Voice Session"))
-    voice_test_controller.trigger_data_channel_open()
+    assert voice_test_controller.wait_for_data_channel_open(timeout_secs=10), "Expected data channel to open"
     _wait_for_text(lambda: S("#voice-status").web_element.text, "Live", 10)
 
     voice_test_controller.clear_requests()
@@ -145,7 +145,7 @@ def test_voice_session_manual_stop(browser, flow_capture, voice_test_controller:
 
     _wait_for_start_voice_enabled()
     click(Button("Start Voice Session"))
-    voice_test_controller.trigger_data_channel_open()
+    assert voice_test_controller.wait_for_data_channel_open(timeout_secs=10), "Expected data channel to open"
     _wait_for_text(lambda: S("#voice-status").web_element.text, "Live", 10)
 
     click(Button("Stop Voice Session"))
