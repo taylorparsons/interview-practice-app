@@ -138,6 +138,7 @@
 - Step 2: Document WeasyPrint/system deps in README and env vars (if any).
 - Step 3: Manual layout review; update checklist doc.
 - Step 4: `git add app/static/js/app.js app/templates/index.html README.md .env.example tests/test_frontend_placeholder.md && git commit -m "feat: pdf export UI and docs"`
+- Step 5: Extend settings UI to expose model/effort/verbosity controls (wired to `PATCH /session/{id}/settings`); persist selection and show “applies to upcoming questions” note.
 
 ---
 

@@ -220,6 +220,27 @@
                                 <button id="voice-save" class="py-1 px-2 border border-indigo-300 rounded-md bg-indigo-50 text-indigo-700 hover:bg-indigo-100">Save</button>
                                 <audio id="voice-preview-audio" class="hidden"></audio>
                             </div>
+                            <div class="inline-flex items-center gap-2 flex-wrap">
+                                <label for="model-select" class="text-gray-600">Model</label>
+                                <select id="model-select" class="border border-gray-300 rounded-md text-xs py-1 px-2">
+                                    <option value="gpt-4o-mini">gpt-4o-mini</option>
+                                    <option value="gpt-5-mini">gpt-5-mini</option>
+                                    <option value="gpt-5">gpt-5</option>
+                                </select>
+                                <label for="effort-select" class="text-gray-600">Effort</label>
+                                <select id="effort-select" class="border border-gray-300 rounded-md text-xs py-1 px-2">
+                                    <option value="medium">medium</option>
+                                    <option value="high">high</option>
+                                </select>
+                                <label for="verbosity-select" class="text-gray-600">Verbosity</label>
+                                <select id="verbosity-select" class="border border-gray-300 rounded-md text-xs py-1 px-2">
+                                    <option value="balanced">balanced</option>
+                                    <option value="low">low</option>
+                                    <option value="medium">medium</option>
+                                    <option value="high">high</option>
+                                </select>
+                                <button id="settings-save" class="py-1 px-2 border border-indigo-300 rounded-md bg-indigo-50 text-indigo-700 hover:bg-indigo-100" title="Applies to upcoming questions">Save model + effort</button>
+                            </div>
                         </div>
                         <audio id="voice-audio" autoplay playsinline class="hidden"></audio>
                         <div id="voice-transcript" class="mt-4 space-y-2 max-h-64 overflow-y-auto text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-md p-3"></div>
@@ -336,9 +357,14 @@
                     </div>
                     
                     <div class="mt-6">
-                        <button id="restart-interview" class="w-full inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
-                            Practice Again
-                        </button>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <button id="restart-interview" class="w-full inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                                Practice Again
+                            </button>
+                            <button id="export-pdf" class="w-full inline-flex justify-center py-2 px-4 border border-indigo-300 shadow-sm text-sm font-medium rounded-md text-indigo-700 bg-indigo-50 hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                                Export PDF
+                            </button>
+                        </div>
                     </div>
 
                     <!-- Per-question detailed cards -->
@@ -400,6 +426,35 @@
                     <button id="voice-preview-2" class="py-1 px-2 border border-gray-300 rounded-md bg-white hover:bg-gray-50">Preview</button>
                     <button id="voice-save-2" class="py-1 px-2 border border-indigo-300 rounded-md bg-indigo-50 text-indigo-700 hover:bg-indigo-100">Save</button>
                     <audio id="voice-preview-audio-2" class="hidden"></audio>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div class="flex flex-col gap-1">
+                        <label for="model-select-2" class="text-gray-600 text-xs">Model</label>
+                        <select id="model-select-2" class="border border-gray-300 rounded-md text-xs py-1 px-2">
+                            <option value="gpt-4o-mini">gpt-4o-mini</option>
+                            <option value="gpt-5-mini">gpt-5-mini</option>
+                            <option value="gpt-5">gpt-5</option>
+                        </select>
+                    </div>
+                    <div class="flex flex-col gap-1">
+                        <label for="effort-select-2" class="text-gray-600 text-xs">Effort</label>
+                        <select id="effort-select-2" class="border border-gray-300 rounded-md text-xs py-1 px-2">
+                            <option value="medium">medium</option>
+                            <option value="high">high</option>
+                        </select>
+                    </div>
+                    <div class="flex flex-col gap-1">
+                        <label for="verbosity-select-2" class="text-gray-600 text-xs">Verbosity</label>
+                        <select id="verbosity-select-2" class="border border-gray-300 rounded-md text-xs py-1 px-2">
+                            <option value="balanced">balanced</option>
+                            <option value="low">low</option>
+                            <option value="medium">medium</option>
+                            <option value="high">high</option>
+                        </select>
+                    </div>
+                    <div class="flex flex-col justify-end">
+                        <button id="settings-save-2" class="py-1 px-2 border border-indigo-300 rounded-md bg-indigo-50 text-indigo-700 hover:bg-indigo-100" title="Applies to upcoming questions">Save model + effort</button>
+                    </div>
                 </div>
                 <div id="voice-select-2-status" class="text-xs text-gray-500"></div>
                 <div>

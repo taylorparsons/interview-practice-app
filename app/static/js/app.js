@@ -41,6 +41,13 @@ function createInitialState() {
         evaluations: [],
         reviewFlags: {},
         coachLevel: 'level_1',
+        practice_history: [],
+        voice_settings: {
+            model_id: 'gpt-4o-mini',
+            thinking_effort: 'medium',
+            verbosity: 'balanced',
+            voice_id: 'verse',
+        },
         // When true, displayFeedback will be shown once after resume if available
         resumeShowFeedbackOnce: false,
         resumeText: '',
@@ -97,6 +104,7 @@ const getExampleBtn = document.getElementById('get-example');
 const nextQuestionBtn = document.getElementById('next-question');
 const backToInterviewBtn = document.getElementById('back-to-interview');
 const restartInterviewBtn = document.getElementById('restart-interview');
+const exportPdfBtn = document.getElementById('export-pdf');
 
 const scoreValue = document.getElementById('score-value');
 const scoreBar = document.getElementById('score-bar');
@@ -139,6 +147,10 @@ const voiceSelect = document.getElementById('voice-select');
 const voicePreviewBtn = document.getElementById('voice-preview');
 const voiceSaveBtn = document.getElementById('voice-save');
 const voicePreviewAudio = document.getElementById('voice-preview-audio');
+const settingsSaveBtn = document.getElementById('settings-save');
+const modelSelect = document.getElementById('model-select');
+const effortSelect = document.getElementById('effort-select');
+const verbositySelect = document.getElementById('verbosity-select');
 // Coaching level controls
 const coachLevelSelect = document.getElementById('coach-level-select');
 const coachLevelSaveBtn = document.getElementById('coach-level-save');
@@ -179,6 +191,10 @@ const voiceSaveBtn2 = document.getElementById('voice-save-2');
 const voicePreviewAudio2 = document.getElementById('voice-preview-audio-2');
 const voiceSelect2Status = document.getElementById('voice-select-2-status');
 const voiceSelect2Retry = document.getElementById('voice-select-2-retry');
+const modelSelect2 = document.getElementById('model-select-2');
+const effortSelect2 = document.getElementById('effort-select-2');
+const verbositySelect2 = document.getElementById('verbosity-select-2');
+const settingsSaveBtn2 = document.getElementById('settings-save-2');
 
 const voiceStatusClasses = {
     idle: 'text-gray-500',
@@ -1842,7 +1858,10 @@ function setupEventListeners() {
 
     // Restart interview
     if (restartInterviewBtn) {
-        restartInterviewBtn.addEventListener('click', handleRestartInterview);
+        restartInterviewBtn.addEventListener('click', handlePracticeAgain);
+    }
+    if (exportPdfBtn) {
+        exportPdfBtn.addEventListener('click', exportPdf);
     }
 
     if (startVoiceBtn) {
@@ -1865,6 +1884,22 @@ function setupEventListeners() {
     if (viewDocsBtn) {
         viewDocsBtn.addEventListener('click', toggleDocsPanel);
     }
+
+    if (settingsSaveBtn) {
+        settingsSaveBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            saveSessionSettings(true);
+        });
+    }
+    if (settingsSaveBtn2) {
+        settingsSaveBtn2.addEventListener('click', (e) => {
+            e.preventDefault();
+            saveSessionSettings(false);
+        });
+    }
+
+    // Ensure settings UI reflects defaults on load
+    syncSettingsUI();
 }
 
 async function initVoiceSelector() {
@@ -2021,6 +2056,20 @@ function syncVoiceSettingsSummary() {
         if (toggleBrowserAsr2) toggleBrowserAsr2.checked = !!cfg.useBrowserAsr;
         if (toggleShowMetadata2) toggleShowMetadata2.checked = !!cfg.showMetadata;
     }
+    syncSettingsUI();
+}
+
+function syncSettingsUI() {
+    const vs = state && state.voice_settings ? state.voice_settings : {};
+    const modelId = vs.model_id || 'gpt-4o-mini';
+    const effort = vs.thinking_effort || 'medium';
+    const verbosity = vs.verbosity || 'balanced';
+    if (modelSelect) modelSelect.value = modelId;
+    if (effortSelect) effortSelect.value = effort;
+    if (verbositySelect) verbositySelect.value = verbosity;
+    if (modelSelect2) modelSelect2.value = modelId;
+    if (effortSelect2) effortSelect2.value = effort;
+    if (verbositySelect2) verbositySelect2.value = verbosity;
 }
 
 async function initCoachLevelSelector() {
@@ -2364,6 +2413,8 @@ async function resumeSavedSession(sessionIdOverride = null) {
         state.questions = data.questions || [];
         state.answers = data.answers || [];
         state.evaluations = data.evaluations || [];
+        state.practice_history = data.practice_history || [];
+        state.voice_settings = data.voice_settings || state.voice_settings;
         state.coachLevel = (data && data.coach_level) || state.coachLevel;
         state.resumeShowFeedbackOnce = true;
         const savedVoiceId = data && data.voice_settings && data.voice_settings.voice_id;
@@ -2397,6 +2448,7 @@ async function resumeSavedSession(sessionIdOverride = null) {
         const hasQuestions = state.questions.length > 0;
         setVoiceEnabled(hasQuestions);
         updateVoiceStatus(hasQuestions ? 'Ready for voice coaching' : 'Offline', 'idle');
+        syncSettingsUI();
 
         if (!hasQuestions) {
             if (interviewContainer) {
@@ -2440,6 +2492,95 @@ async function resumeSavedSessionById(sessionId) {
         return;
     }
     await resumeSavedSession(sessionId);
+}
+
+function gatherSettingsFromUI(primary = true) {
+    const ms = primary ? modelSelect : modelSelect2;
+    const es = primary ? effortSelect : effortSelect2;
+    const vs = primary ? verbositySelect : verbositySelect2;
+    return {
+        model_id: (ms && ms.value) || 'gpt-4o-mini',
+        thinking_effort: (es && es.value) || 'medium',
+        verbosity: (vs && vs.value) || 'balanced',
+    };
+}
+
+async function saveSessionSettings(primary = true) {
+    if (!state.sessionId) {
+        alert('Start or resume a session first.');
+        return;
+    }
+    const payload = gatherSettingsFromUI(primary);
+    const button = primary ? document.getElementById('settings-save') : settingsSaveBtn2;
+    const orig = button ? button.textContent : '';
+    if (button) {
+        button.disabled = true;
+        button.textContent = 'Saving…';
+        button.classList.add('opacity-50');
+    }
+    try {
+        const res = await fetch(`/session/${state.sessionId}/settings`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+            const text = await res.text();
+            throw new Error(text || 'Failed to save settings');
+        }
+        const data = await res.json();
+        state.voice_settings = data.voice_settings || payload;
+        alert('Saved. Applies to upcoming questions.');
+    } catch (err) {
+        console.error('Settings save failed:', err);
+        alert(err && err.message ? err.message : 'Unable to save settings.');
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.textContent = orig || 'Save model + effort';
+            button.classList.remove('opacity-50');
+        }
+        syncSettingsUI();
+    }
+}
+
+async function exportPdf() {
+    if (!state.sessionId) {
+        alert('No session to export yet.');
+        return;
+    }
+    const btn = exportPdfBtn;
+    const orig = btn ? btn.textContent : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Exporting…';
+        btn.classList.add('opacity-50');
+    }
+    try {
+        const res = await fetch(`/sessions/${state.sessionId}/exports/pdf`, { method: 'POST' });
+        if (!res.ok) {
+            const txt = await res.text();
+            throw new Error(txt || 'Export failed');
+        }
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `session-${state.sessionId}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+    } catch (err) {
+        console.error('PDF export failed', err);
+        alert(err && err.message ? err.message : 'Unable to export PDF.');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = orig || 'Export PDF';
+            btn.classList.remove('opacity-50');
+        }
+    }
 }
 
 
@@ -2525,6 +2666,8 @@ async function handleDocumentUpload(e) {
         const data = await response.json();
         state.sessionId = data.session_id;
         localStorage.setItem('interviewSessionId', state.sessionId);
+        state.voice_settings = state.voice_settings || createInitialState().voice_settings;
+        syncSettingsUI();
         updateResumeControlsVisibility();
         await loadSessionDocuments(state.sessionId).catch(() => {});
         
@@ -3330,6 +3473,73 @@ function escapeHtml(str) {
         .replace(/>/g, '&gt;')
         .replace(/\"/g, '&quot;')
         .replace(/'/g, '&#039;');
+}
+
+// Practice Again: reuse questions, optionally append new ones, and reset state
+async function handlePracticeAgain() {
+    if (!state || !state.sessionId) {
+        handleRestartInterview();
+        return;
+    }
+
+    let addQuestions = [];
+    try {
+        const input = window.prompt('Add new questions (optional). Separate by comma or newline. Leave blank to reuse the current set.');
+        if (input && input.trim()) {
+            addQuestions = input.split(/[\n,]+/).map((q) => q.trim()).filter(Boolean);
+        }
+    } catch (_) {
+        addQuestions = [];
+    }
+
+    const originalText = restartInterviewBtn ? restartInterviewBtn.textContent : '';
+    if (restartInterviewBtn) {
+        restartInterviewBtn.disabled = true;
+        restartInterviewBtn.textContent = 'Resetting…';
+    }
+
+    try {
+        const res = await fetch(`/session/${state.sessionId}/practice-again`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ add_questions: addQuestions }),
+        });
+        if (!res.ok) {
+            const err = await res.text();
+            throw new Error(err || 'Unable to start Practice Again');
+        }
+        const data = await res.json();
+        state.questions = data.questions || [];
+        state.currentQuestionIndex = data.current_question_index || 0;
+        state.answers = [];
+        state.evaluations = [];
+        state.practice_history = data.practice_history || [];
+        state.per_question = new Array(state.questions.length).fill(null);
+        state.voice = createInitialVoiceState();
+        clearVoiceTranscript();
+        setVoiceLayout(false);
+        setVoiceControls(false);
+        setVoiceEnabled(state.questions.length > 0);
+        updateVoiceStatus('Offline', 'idle');
+        if (summarySection) summarySection.classList.add('hidden');
+        if (interviewSection) interviewSection.classList.remove('hidden');
+        refreshSessionsList(state.sessionId);
+        refreshSwitcherList();
+        if (state.questions.length > 0) {
+            displayQuestion(0);
+        } else if (currentQuestion) {
+            currentQuestion.textContent = 'Add a question to start your next run.';
+        }
+        updateProgress();
+    } catch (err) {
+        console.error('Practice Again failed:', err);
+        alert(err && err.message ? err.message : 'Unable to start Practice Again right now.');
+    } finally {
+        if (restartInterviewBtn) {
+            restartInterviewBtn.disabled = false;
+            restartInterviewBtn.textContent = originalText || 'Practice Again';
+        }
+    }
 }
 
 // Handle restarting interview

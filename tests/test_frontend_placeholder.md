@@ -7,3 +7,4 @@ Use this checklist to verify dual-sided transcripts, formatting, and mic UX:
 - Toggle “Browser ASR fallback” and “Show metadata”; metadata appears only when enabled.
 - Mic indicator cycles through idle → listening → speaking; when mic permission is denied, indicator shows `muted`.
 - Export transcript (JSON/txt) produces both roles.
+- Export PDF (Summary → Export PDF) downloads a file with questions/evaluations/transcripts.

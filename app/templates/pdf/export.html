@@ -1,0 +1,62 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <style>
+      body { font-family: Arial, sans-serif; color: #1f2937; margin: 24px; }
+      h1, h2, h3 { color: #111827; margin-bottom: 8px; }
+      .meta { font-size: 12px; color: #6b7280; margin-bottom: 16px; }
+      .card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px 16px; margin-bottom: 12px; }
+      .label { font-size: 12px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.03em; }
+      .question { font-weight: 600; margin: 4px 0; }
+      .voice { background: #f8fafc; padding: 8px; border-radius: 6px; margin-top: 6px; }
+      .role { font-weight: 600; }
+      ul { margin: 4px 0 8px 18px; }
+      .section { margin-top: 16px; }
+    </style>
+  </head>
+  <body>
+    <h1>Interview Study Guide</h1>
+    <div class="meta">
+      Session: {{ name }} ({{ session_id }})<br>
+      Created: {{ created_at or "N/A" }}<br>
+      Updated: {{ updated_at or "N/A" }}
+    </div>
+
+    <div class="section">
+      <h2>Questions & Responses</h2>
+      {% for q in questions %}
+      <div class="card">
+        <div class="label">Question {{ loop.index }}</div>
+        <div class="question">{{ q }}</div>
+        {% set answer = answers[loop.index0] if loop.index0 < answers|length else None %}
+        {% if answer %}
+        <div><span class="label">Answer</span><br>{{ answer.answer }}</div>
+        {% endif %}
+        {% set evaluation = evaluations[loop.index0] if loop.index0 < evaluations|length else None %}
+        {% if evaluation %}
+        <div class="section">
+          <div class="label">Evaluation (Score {{ evaluation.score }})</div>
+          <div>{{ evaluation.feedback or "" }}</div>
+          {% if evaluation.strengths %}<div><strong>Strengths:</strong> {{ evaluation.strengths|join(", ") }}</div>{% endif %}
+          {% if evaluation.weaknesses %}<div><strong>Weaknesses:</strong> {{ evaluation.weaknesses|join(", ") }}</div>{% endif %}
+        </div>
+        {% endif %}
+        {% set msgs = voice_messages | selectattr('question_index', 'equalto', loop.index0) | list %}
+        {% if msgs and msgs|length > 0 %}
+        <div class="section">
+          <div class="label">Voice Dialog</div>
+          {% for m in msgs %}
+          <div class="voice">
+            <div class="role">{{ m.role|capitalize }}</div>
+            <div>{{ m.text }}</div>
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+
+  </body>
+</html>

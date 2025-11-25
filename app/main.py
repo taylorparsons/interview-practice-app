@@ -3,6 +3,7 @@ import os
 import asyncio
 import textwrap
 import uuid
+import io
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from functools import lru_cache
@@ -37,6 +38,8 @@ from app.utils.session_store import (
     rename_session as rename_persisted_session,
 )
 from app.utils.markdown import render_markdown_safe
+from app.utils.practice_history import record_completed_run
+from app.utils.pdf import render_pdf_from_html
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -93,7 +96,17 @@ def _ensure_session_defaults(session: Dict[str, Any]) -> Dict[str, Any]:
         voice_settings = {}
     if not voice_settings.get("voice_id"):
         voice_settings["voice_id"] = OPENAI_REALTIME_VOICE
+    if not voice_settings.get("model_id"):
+        voice_settings["model_id"] = OPENAI_MODEL
+    if not voice_settings.get("thinking_effort"):
+        voice_settings["thinking_effort"] = "medium"
+    if not voice_settings.get("verbosity"):
+        voice_settings["verbosity"] = "balanced"
     session["voice_settings"] = voice_settings
+    if "pdf_exports" not in session or session["pdf_exports"] is None:
+        session["pdf_exports"] = []
+    if "practice_history" not in session or session["practice_history"] is None:
+        session["practice_history"] = []
     # Default the coaching persona to the easier (supportive) mode when
     # missing. This value is persisted per-session and can be changed by the UI
     # via PATCH /session/{id}/coach-level.
@@ -214,6 +227,12 @@ class ExampleAnswerResponse(BaseModel):
     answer: str
 
 
+class SessionSettingsRequest(BaseModel):
+    model_id: Optional[str] = None
+    thinking_effort: Optional[str] = None
+    verbosity: Optional[str] = None
+
+
 class AddQuestionRequest(BaseModel):
     question: str
     make_active: Optional[bool] = True
@@ -224,6 +243,56 @@ class AddQuestionResponse(BaseModel):
     index: int
     questions: List[str]
     current_question_index: int
+
+
+class PracticeAgainRequest(BaseModel):
+    add_questions: Optional[List[str]] = None
+
+
+
+@app.post("/session/{session_id}/practice-again")
+async def practice_again(session_id: str, payload: PracticeAgainRequest):
+    """Snapshot current run, then reset answers/transcripts for a new run."""
+    session = _get_session(session_id)
+
+    # Record completed run metadata before mutating state
+    vs = session.get("voice_settings") or {}
+    model_id = vs.get("model_id") or OPENAI_MODEL
+    voice_id = vs.get("voice_id") or OPENAI_REALTIME_VOICE
+    record_completed_run(session, model_id=model_id, voice_id=voice_id)
+
+    questions: List[str] = session.get("questions") or []
+    additions: List[str] = []
+    for raw in payload.add_questions or []:
+        normalized = " ".join((raw or "").split()).strip()
+        if not normalized:
+            continue
+        if normalized not in questions and normalized not in additions:
+            additions.append(normalized)
+    if additions:
+        questions = questions + additions
+        session["questions"] = questions
+
+    # Reset run state
+    session["answers"] = []
+    session["evaluations"] = []
+    session["per_question"] = [None] * len(session.get("questions") or [])
+    session["voice_transcripts"] = {}
+    session["voice_agent_text"] = {}
+    session["voice_messages"] = []
+    session["current_question_index"] = 0
+    session["agent"] = None
+    session["current_run_id"] = str(uuid.uuid4())
+    session["updated_at"] = datetime.utcnow().isoformat() + "Z"
+
+    _persist_session_state(session_id, session)
+    return {
+        "ok": True,
+        "run_id": session["current_run_id"],
+        "questions": session.get("questions", []),
+        "current_question_index": session.get("current_question_index", 0),
+        "practice_history": session.get("practice_history", []),
+    }
 
 
 class VoiceSessionRequest(BaseModel):
@@ -243,6 +312,23 @@ class VoiceDescriptor(BaseModel):
     id: str
     label: str
     preview_url: Optional[str] = None
+
+
+class PracticeAgainRequest(BaseModel):
+    add_questions: Optional[List[str]] = None
+
+
+class SessionSettingsRequest(BaseModel):
+    model_id: Optional[str] = None
+    thinking_effort: Optional[str] = None
+    verbosity: Optional[str] = None
+
+
+class PDFExportResponse(BaseModel):
+    ok: bool
+    filename: str
+    size: int
+    exported_at: str
 
 
 class SessionListItem(BaseModel):
@@ -358,6 +444,14 @@ async def upload_documents(
         "voice_transcripts": {},
         "voice_agent_text": {},
         "voice_messages": [],
+        "voice_settings": {
+            "voice_id": OPENAI_REALTIME_VOICE,
+            "model_id": OPENAI_MODEL,
+            "thinking_effort": "medium",
+            "verbosity": "balanced",
+        },
+        "practice_history": [],
+        "pdf_exports": [],
         # Store the UI-selectable coach level; default to level_1 (Help).
         "coach_level": "level_1",
     }
@@ -915,6 +1009,50 @@ async def set_coach_level(session_id: str, payload: SetCoachLevelRequest):
     return {"ok": True, "level": level}
 
 
+@app.patch("/session/{session_id}/settings")
+async def update_session_settings(session_id: str, payload: SessionSettingsRequest):
+    """Update session-scoped model/effort/verbosity settings."""
+    session = _get_session(session_id)
+    allowed_models = {"gpt-4o-mini", "gpt-5-mini", "gpt-5"}
+    allowed_effort = {"medium", "high"}
+    allowed_verbosity = {"low", "medium", "balanced", "high"}
+
+    vs = session.get("voice_settings") or {}
+
+    if payload.model_id:
+        if payload.model_id not in allowed_models:
+            raise HTTPException(status_code=400, detail="Invalid model_id")
+        vs["model_id"] = payload.model_id
+
+    if payload.thinking_effort:
+        eff = (payload.thinking_effort or "").strip().lower()
+        if eff not in allowed_effort:
+            raise HTTPException(status_code=400, detail="Invalid thinking_effort")
+        vs["thinking_effort"] = eff
+
+    if payload.verbosity:
+        verb = (payload.verbosity or "").strip().lower()
+        if verb not in allowed_verbosity:
+            raise HTTPException(status_code=400, detail="Invalid verbosity")
+        vs["verbosity"] = verb
+
+    session["voice_settings"] = vs
+    session["agent"] = None  # force re-init on next use to pick up model change
+    _persist_session_state(session_id, session)
+    try:
+        logger.info(
+            "session.settings.update: session=%s model=%s effort=%s verbosity=%s",
+            session_id,
+            vs.get("model_id"),
+            vs.get("thinking_effort"),
+            vs.get("verbosity"),
+        )
+    except Exception:
+        pass
+
+    return {"ok": True, "voice_settings": vs}
+
+
 @app.post("/voice/session", response_model=VoiceSessionResponse)
 async def create_voice_session(request: VoiceSessionRequest):
     if not OPENAI_API_KEY:
@@ -996,6 +1134,49 @@ async def create_voice_session(request: VoiceSessionRequest):
         client_secret=client_secret,
         url=OPENAI_REALTIME_URL,
         expires_at=data.get("expires_at"),
+    )
+
+
+@app.post("/sessions/{session_id}/exports/pdf")
+async def export_pdf(session_id: str, background_tasks: BackgroundTasks, request: Request):
+    """Render and stream a PDF study guide for the session."""
+    session = _get_session(session_id)
+
+    template = templates.get_template("pdf/export.html")
+    context = {
+        "session_id": session_id,
+        "name": session.get("name") or f"Session {session_id[:8]}",
+        "questions": session.get("questions") or [],
+        "answers": session.get("answers") or [],
+        "evaluations": session.get("evaluations") or [],
+        "voice_messages": session.get("voice_messages") or [],
+        "created_at": session.get("created_at"),
+        "updated_at": session.get("updated_at"),
+    }
+
+    html = template.render(**context)
+    try:
+        pdf_bytes = render_pdf_from_html(html, base_url=str(request.base_url))
+    except Exception:
+        logger.exception("pdf.render.failed: session=%s", session_id)
+        raise HTTPException(status_code=500, detail="PDF export failed")
+
+    filename = f"session-{session_id}.pdf"
+    size = len(pdf_bytes)
+    exported_at = datetime.utcnow().isoformat() + "Z"
+
+    exports = session.get("pdf_exports") or []
+    exports.append({"filename": filename, "size": size, "exported_at": exported_at})
+    session["pdf_exports"] = exports
+    _persist_session_state(session_id, session)
+
+    # Keep signature ready for future background processing
+    background_tasks.add_task(lambda: None)
+
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
 
 
@@ -1170,9 +1351,11 @@ async def start_agent(session_id: str):
 
     try:
         # Initialize the agent with session data
+        voice_settings = session.get("voice_settings") or {}
+        model_id = voice_settings.get("model_id") or OPENAI_MODEL
         agent = InterviewPracticeAgent(
             openai_api_key=OPENAI_API_KEY,
-            openai_model=OPENAI_MODEL,
+            openai_model=model_id,
             resume_text=session["resume_text"],
             job_description_text=session["job_desc_text"],
             session_id=session_id,
