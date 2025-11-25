@@ -43,3 +43,9 @@ app/session_store/
 
 # Uploaded documents
 app/uploads/
+
+tests/ui/__artifacts__/*
+app/knowledge_store/
+audio_responses/
+analyzer_out.txt
+tests/ui/

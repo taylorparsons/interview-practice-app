@@ -136,6 +136,27 @@
                         <h3 class="font-medium text-indigo-700 mb-2">Question</h3>
                         <p id="current-question" class="text-gray-800"></p>
                     </div>
+                    <div id="custom-question-card" class="p-4 bg-white border border-dashed border-indigo-200 rounded-lg shadow-sm">
+                        <div class="flex items-center justify-between gap-3">
+                            <div>
+                                <h3 class="font-medium text-indigo-700">Add your own question</h3>
+                                <p class="text-sm text-gray-600">Paste any interview question to practice it immediately.</p>
+                            </div>
+                            <span id="custom-question-status" class="hidden text-xs font-medium text-green-700">Added</span>
+                        </div>
+                        <div class="mt-3 flex flex-col gap-2">
+                            <textarea id="custom-question-input" rows="3" placeholder="Paste your interview question here..." class="block w-full px-3 py-2 border border-indigo-200 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"></textarea>
+                            <div class="flex flex-wrap gap-2">
+                                <button id="add-custom-question" type="button" class="inline-flex justify-center items-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                                    Add &amp; Go
+                                </button>
+                                <button id="clear-custom-question" type="button" class="inline-flex justify-center items-center py-2 px-3 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                                    Clear
+                                </button>
+                            </div>
+                            <p class="text-xs text-gray-500">We’ll append it to your session and jump to it.</p>
+                        </div>
+                    </div>
                     <p class="text-sm text-gray-500">Your answers and progress save automatically. Visit this page later and use <span class="font-medium text-indigo-600">Resume Saved Session</span> to pick up where you left off.</p>
 
                     <div id="voice-agent-panel" class="p-4 bg-white border border-indigo-100 rounded-lg shadow-sm">
@@ -145,6 +166,12 @@
                                 <p class="text-sm text-gray-600">Speak with the AI interviewer in real time and see summaries of the conversation.</p>
                             </div>
                             <span id="voice-status" class="text-sm font-medium text-gray-500">Offline</span>
+                        </div>
+                        <div class="mt-2 flex items-center gap-3 text-xs text-gray-600">
+                            <label class="inline-flex items-center gap-1">
+                                <input id="voice-transcript-freeze" type="checkbox" class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
+                                <span>Freeze transcript scroll</span>
+                            </label>
                         </div>
                         <div class="mt-3 flex items-center space-x-3">
                             <button id="start-voice" disabled class="inline-flex justify-center items-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 opacity-50 cursor-not-allowed">
@@ -408,6 +435,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/livekit-client/dist/livekit-client.umd.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/showdown@2.1.0/dist/showdown.min.js"></script>
-    <script src="/static/js/app.js"></script>
+    <script src="/static/js/app.js?v=20241124"></script>
 </body>
 </html>

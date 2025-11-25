@@ -41,6 +41,8 @@ function createInitialState() {
         evaluations: [],
         reviewFlags: {},
         coachLevel: 'level_1',
+        // When true, displayFeedback will be shown once after resume if available
+        resumeShowFeedbackOnce: false,
         resumeText: '',
         jobDescText: '',
         room: null,
@@ -85,6 +87,10 @@ const switchSessionBtn = document.getElementById('switch-session');
 
 const uploadForm = document.getElementById('upload-form');
 const currentQuestion = document.getElementById('current-question');
+const customQuestionInput = document.getElementById('custom-question-input');
+const addCustomQuestionBtn = document.getElementById('add-custom-question');
+const clearCustomQuestionBtn = document.getElementById('clear-custom-question');
+const customQuestionStatus = document.getElementById('custom-question-status');
 const answerInput = document.getElementById('answer');
 const answerBtn = document.getElementById('submit-answer');
 const getExampleBtn = document.getElementById('get-example');
@@ -116,6 +122,7 @@ const startVoiceBtn = document.getElementById('start-voice');
 const stopVoiceBtn = document.getElementById('stop-voice');
 const voiceStatus = document.getElementById('voice-status');
 const voiceTranscript = document.getElementById('voice-transcript');
+const voiceTranscriptFreeze = document.getElementById('voice-transcript-freeze');
 const voiceAudio = document.getElementById('voice-audio');
 const voiceActivityIndicator = document.getElementById('voice-activity-indicator');
 const voiceActivityDot = voiceActivityIndicator
@@ -188,6 +195,14 @@ const voiceActivityModes = {
     unsupported: { dot: 'bg-gray-400', label: 'Mic level unavailable' },
 };
 let voiceActivityState = 'idle';
+let customQuestionStatusTimer = null;
+let customQuestionBound = false;
+const feedbackNoiseTokens = new Set([
+    'Unable to parse structured feedback',
+    'No specific strengths noted.',
+    'No specific improvements suggested.',
+    'No content feedback available.',
+]);
 
 function setVoiceControls(active) {
     if (startVoiceBtn) {
@@ -256,6 +271,13 @@ function clearVoiceTranscript() {
     voiceTranscript.innerHTML = '<p class="text-xs text-gray-500">Voice transcripts will appear here once the realtime session begins.</p>';
     setVoiceActivityIndicator('idle');
     try { updateVoiceSubmitAvailability(); } catch (_) {}
+}
+
+function scrollVoiceTranscriptToBottom() {
+    if (!voiceTranscript) return;
+    const frozen = voiceTranscript.dataset.freeze === 'true';
+    if (frozen) return;
+    voiceTranscript.scrollTop = voiceTranscript.scrollHeight;
 }
 
 const voiceRoleToBackend = {
@@ -637,6 +659,9 @@ function appendVoiceMessage(role, message, options = {}) {
         return null;
     }
 
+    const qIndex = Number.isInteger(options.questionIndex)
+        ? options.questionIndex
+        : (Number.isInteger(state.currentQuestionIndex) ? state.currentQuestionIndex : null);
     const displayRole = voiceRoleToDisplay[role] || role;
 
     if (state && state.voice && Array.isArray(state.voice.messages) && !options.stream) {
@@ -667,10 +692,10 @@ function appendVoiceMessage(role, message, options = {}) {
         label.textContent = displayRole === 'agent' ? 'Coach' : 'You';
         wrapper.appendChild(label);
 
-        const content = document.createElement('p');
-        content.textContent = text;
-        wrapper.appendChild(content);
-        if (state.voice && state.voice.config && state.voice.config.showMetadata && options.meta) {
+            const content = document.createElement('p');
+            content.textContent = text;
+            wrapper.appendChild(content);
+            if (state.voice && state.voice.config && state.voice.config.showMetadata && options.meta) {
             const meta = options.meta || {};
             const parts = [];
             if (meta.ts) {
@@ -705,6 +730,12 @@ function appendVoiceMessage(role, message, options = {}) {
         timestamp: new Date().toISOString(),
         stream: !!options.stream,
     };
+    if (Number.isInteger(qIndex)) {
+        entry.question_index = qIndex;
+        if (state.questions && state.questions[qIndex]) {
+            wrapper.title = state.questions[qIndex];
+        }
+    }
     if (options.meta) {
         entry.meta = options.meta;
     }
@@ -714,8 +745,13 @@ function appendVoiceMessage(role, message, options = {}) {
         entryIndex = state.voice.messages.length - 1;
     }
 
+    // Attach question context tooltip
+    if (Number.isInteger(qIndex) && state.questions && state.questions[qIndex]) {
+        wrapper.title = state.questions[qIndex];
+    }
+
     voiceTranscript.appendChild(wrapper);
-    voiceTranscript.scrollTop = voiceTranscript.scrollHeight;
+    scrollVoiceTranscriptToBottom();
 
     return { wrapper, entry, entryIndex };
 }
@@ -1099,8 +1135,13 @@ async function startVoiceInterview() {
     setVoiceControls(true);
     setVoiceLayout(true);
     updateVoiceStatus('Connecting...', 'pending');
-    clearVoiceTranscript();
-    appendVoiceMessage('system', '--- Starting new voice session ---');
+    const hasHistory = state.voice && Array.isArray(state.voice.messages) && state.voice.messages.length > 0;
+    if (hasHistory) {
+        appendVoiceMessage('system', '--- Starting new voice session ---');
+    } else {
+        clearVoiceTranscript();
+        appendVoiceMessage('system', '--- Starting voice session ---');
+    }
 
     try {
         const response = await fetch('/voice/session', {
@@ -1533,18 +1574,19 @@ function stopBrowserAsr() {
 }
 
 // Event listeners
-document.addEventListener('DOMContentLoaded', () => {
-    setupEventListeners();
-    setupSpeechRecognition();
-    clearVoiceTranscript();
-    updateVoiceStatus('Offline', 'idle');
-    setVoiceControls(false);
-    setVoiceEnabled(false);
-    refreshSessionsList(state.sessionId);
-        refreshSwitcherList();
-    initVoiceSelector();
-    // Initialize coach level select/save (loads current level on active session)
-    (async () => { try { await initCoachLevelSelector(); } catch (_) {} })();
+    document.addEventListener('DOMContentLoaded', () => {
+        setupEventListeners();
+        setupSpeechRecognition();
+        clearVoiceTranscript();
+        updateVoiceStatus('Offline', 'idle');
+        setVoiceControls(false);
+        setVoiceEnabled(false);
+        if (voiceTranscript) voiceTranscript.dataset.freeze = 'false';
+        refreshSessionsList(state.sessionId);
+            refreshSwitcherList();
+        initVoiceSelector();
+        // Initialize coach level select/save (loads current level on active session)
+        (async () => { try { await initCoachLevelSelector(); } catch (_) {} })();
     // Initialize voice settings toggles
     if (toggleBrowserAsr) {
         toggleBrowserAsr.checked = !!(state.voice && state.voice.config && state.voice.config.useBrowserAsr);
@@ -1559,14 +1601,21 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
-    if (toggleShowMetadata) {
-        toggleShowMetadata.checked = !!(state.voice && state.voice.config && state.voice.config.showMetadata);
-        toggleShowMetadata.addEventListener('change', () => {
-            if (state.voice && state.voice.config) {
-                state.voice.config.showMetadata = !!toggleShowMetadata.checked;
-            }
-        });
-    }
+        if (toggleShowMetadata) {
+            toggleShowMetadata.checked = !!(state.voice && state.voice.config && state.voice.config.showMetadata);
+            toggleShowMetadata.addEventListener('change', () => {
+                if (state.voice && state.voice.config) {
+                    state.voice.config.showMetadata = !!toggleShowMetadata.checked;
+                }
+            });
+        }
+        if (voiceTranscriptFreeze && voiceTranscript) {
+            voiceTranscriptFreeze.checked = voiceTranscript.dataset.freeze === 'true';
+            voiceTranscriptFreeze.addEventListener('change', () => {
+                voiceTranscript.dataset.freeze = voiceTranscriptFreeze.checked ? 'true' : 'false';
+                if (!voiceTranscriptFreeze.checked) scrollVoiceTranscriptToBottom();
+            });
+        }
     if (exportTranscriptBtn) {
         exportTranscriptBtn.addEventListener('click', exportFullTranscript);
     }
@@ -1732,6 +1781,8 @@ function setupEventListeners() {
     if (answerBtn) {
         answerBtn.addEventListener('click', handleAnswerSubmission);
     }
+
+    bindCustomQuestionControls();
 
     // Get example answer
     if (getExampleBtn) {
@@ -1922,6 +1973,21 @@ async function loadSessionDocuments(sessionId) {
     } catch (err) {
         console.error('Docs load error:', err);
         throw err;
+    }
+}
+
+function syncVoiceSettingsSummary() {
+    const voiceId = state && state.voice && state.voice.selectedVoiceId;
+    if (voiceId) {
+        if (voiceSelect) voiceSelect.value = voiceId;
+        if (voiceSelect2) voiceSelect2.value = voiceId;
+    }
+    const cfg = state && state.voice && state.voice.config;
+    if (cfg) {
+        if (toggleBrowserAsr) toggleBrowserAsr.checked = !!cfg.useBrowserAsr;
+        if (toggleShowMetadata) toggleShowMetadata.checked = !!cfg.showMetadata;
+        if (toggleBrowserAsr2) toggleBrowserAsr2.checked = !!cfg.useBrowserAsr;
+        if (toggleShowMetadata2) toggleShowMetadata2.checked = !!cfg.showMetadata;
     }
 }
 
@@ -2237,6 +2303,7 @@ async function resumeSavedSession(sessionIdOverride = null) {
         updateVoiceStatus('Offline', 'idle');
         setVoiceControls(false);
         setVoiceEnabled(false);
+        if (voiceTranscript) voiceTranscript.dataset.freeze = 'false';
 
         if (uploadSection) {
             uploadSection.classList.add('hidden');
@@ -2247,6 +2314,13 @@ async function resumeSavedSession(sessionIdOverride = null) {
 
         const response = await fetch(`/session/${savedSessionId}`);
         if (!response.ok) {
+            if (response.status === 404) {
+                localStorage.removeItem('interviewSessionId');
+                updateResumeControlsVisibility();
+                await refreshSessionsList();
+                await refreshSwitcherList();
+                throw new Error('Saved session was not found (it may have been removed). Please pick another session.');
+            }
             throw new Error('Failed to load saved session');
         }
 
@@ -2259,6 +2333,7 @@ async function resumeSavedSession(sessionIdOverride = null) {
         state.answers = data.answers || [];
         state.evaluations = data.evaluations || [];
         state.coachLevel = (data && data.coach_level) || state.coachLevel;
+        state.resumeShowFeedbackOnce = true;
         const savedVoiceId = data && data.voice_settings && data.voice_settings.voice_id;
         if (savedVoiceId) state.voice.selectedVoiceId = savedVoiceId;
         await loadSessionDocuments(state.sessionId).catch(() => {});
@@ -2295,7 +2370,7 @@ async function resumeSavedSession(sessionIdOverride = null) {
             if (interviewContainer) {
                 interviewContainer.classList.remove('hidden');
             }
-            currentQuestion.textContent = 'No questions available yet. Generate questions to begin.';
+            currentQuestion.textContent = 'No questions available yet. Generate or add your own question to begin.';
             feedbackSection.classList.add('hidden');
             exampleSection.classList.add('hidden');
             summarySection.classList.add('hidden');
@@ -2316,7 +2391,7 @@ async function resumeSavedSession(sessionIdOverride = null) {
         updateResumeControlsVisibility();
     } catch (error) {
         console.error('Error resuming session:', error);
-        alert('Unable to resume the saved session. It may have expired or been removed.');
+        alert(error && error.message ? error.message : 'Unable to resume the saved session. It may have expired or been removed.');
         localStorage.removeItem('interviewSessionId');
         updateResumeControlsVisibility();
         if (loadingSection) {
@@ -2472,6 +2547,131 @@ async function generateQuestions() {
     }
 }
 
+function renderMarkdownish(text) {
+    if (!text) return '';
+    try {
+        if (typeof showdown !== 'undefined') {
+            const converter = new showdown.Converter();
+            return converter.makeHtml(text);
+        }
+    } catch (_) {}
+    return String(text).replace(/\n/g, '<br>');
+}
+
+function stripMarkdownish(text) {
+    if (!text) return '';
+    let out = String(text);
+    out = out.replace(/\*\*(.*?)\*\*/g, '$1');
+    out = out.replace(/\*(.*?)\*/g, '$1');
+    out = out.replace(/`([^`]*)`/g, '$1');
+    out = out.replace(/^#+\s*/gm, '');
+    out = out.replace(/\s+/g, ' ').trim();
+    return out;
+}
+
+function cleanFeedbackFragment(text) {
+    if (!text) return '';
+    return String(text).replace(/\s*\b\d+\.\s*$/g, '').trim();
+}
+
+function isNoiseFeedback(str) {
+    if (!str) return true;
+    const normalized = String(str).trim();
+    if (!normalized) return true;
+    return feedbackNoiseTokens.has(normalized);
+}
+
+function setCustomQuestionStatus(message, tone = 'success') {
+    if (!customQuestionStatus) return;
+    if (customQuestionStatusTimer) {
+        clearTimeout(customQuestionStatusTimer);
+        customQuestionStatusTimer = null;
+    }
+    customQuestionStatus.textContent = message;
+    customQuestionStatus.classList.remove('hidden');
+    customQuestionStatus.classList.remove('text-rose-700', 'text-green-700');
+    customQuestionStatus.classList.add(tone === 'error' ? 'text-rose-700' : 'text-green-700');
+    customQuestionStatusTimer = setTimeout(() => {
+        customQuestionStatus.classList.add('hidden');
+    }, 3000);
+}
+
+async function handleAddCustomQuestion() {
+    let sid = state.sessionId || localStorage.getItem('interviewSessionId');
+    if (!sid) {
+        alert('Start or resume a session first.');
+        return;
+    }
+    state.sessionId = sid;
+    const text = customQuestionInput ? customQuestionInput.value.trim() : '';
+    if (!text) {
+        alert('Paste a question to add.');
+        return;
+    }
+
+    const btn = addCustomQuestionBtn;
+    const setLoading = (loading) => {
+        if (!btn) return;
+        const orig = btn.dataset.origLabel || btn.textContent;
+        if (!btn.dataset.origLabel) btn.dataset.origLabel = orig;
+        btn.disabled = !!loading;
+        btn.classList.toggle('opacity-50', !!loading);
+        btn.textContent = loading ? 'Adding…' : btn.dataset.origLabel;
+    };
+
+    setLoading(true);
+    try {
+        const res = await fetch(`/session/${sid}/questions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ question: text, make_active: true })
+        });
+        if (!res.ok) {
+            const detail = await res.text();
+            throw new Error(detail || 'Failed to add question');
+        }
+        const data = await res.json();
+        state.questions = data.questions || [];
+        const idx = typeof data.current_question_index === 'number'
+            ? data.current_question_index
+            : (typeof data.index === 'number' ? data.index : (state.currentQuestionIndex || 0));
+        state.currentQuestionIndex = Math.max(0, Math.min(idx, state.questions.length - 1));
+        setVoiceEnabled(state.questions.length > 0);
+        updateVoiceStatus('Ready for voice coaching', 'idle');
+        displayQuestion(state.currentQuestionIndex);
+        buildQuestionRail();
+        updateQuestionPosition();
+        refreshSessionsList(state.sessionId);
+        refreshSwitcherList();
+        if (customQuestionInput) customQuestionInput.value = '';
+        setCustomQuestionStatus('Added to your list');
+    } catch (err) {
+        console.error('Error adding custom question:', err);
+        if (customQuestionStatus) {
+        setCustomQuestionStatus(err.message || 'Unable to add question', 'error');
+    } else {
+        alert(err.message || 'Unable to add question');
+    }
+    } finally {
+        setLoading(false);
+    }
+}
+
+function bindCustomQuestionControls() {
+    if (!customQuestionBound) {
+        if (addCustomQuestionBtn) addCustomQuestionBtn.addEventListener('click', handleAddCustomQuestion);
+        if (clearCustomQuestionBtn) {
+            clearCustomQuestionBtn.addEventListener('click', () => {
+                if (customQuestionInput) customQuestionInput.value = '';
+                if (customQuestionStatus) customQuestionStatus.classList.add('hidden');
+            });
+        }
+        customQuestionBound = true;
+    }
+}
+
+bindCustomQuestionControls();
+
 // Display current question
 function displayQuestion(index) {
     if (index >= state.questions.length) {
@@ -2498,7 +2698,10 @@ function displayQuestion(index) {
     const question = state.questions[index];
     
     currentQuestion.textContent = question;
-    answerInput.value = '';
+    if (answerInput) {
+        const saved = (state.answers || []).find(a => a && a.question === question);
+        answerInput.value = saved ? (saved.answer || '') : '';
+    }
     updateQuestionPosition();
     
     if (interviewContainer) {
@@ -2512,6 +2715,17 @@ function displayQuestion(index) {
     }
     refreshSwitcherList();
     buildQuestionRail();
+
+    // If resuming and we already have feedback for this question, show it once.
+    try {
+        if (state.resumeShowFeedbackOnce) {
+            const ev = state.evaluations && state.evaluations[index];
+            if (ev) {
+                state.resumeShowFeedbackOnce = false;
+                displayFeedback(ev);
+            }
+        }
+    } catch (_) {}
 }
 
 function updateQuestionPosition() {
@@ -2611,9 +2825,10 @@ function displayFeedback(evaluation) {
     
     // Format strengths (handling both string and array formats)
     if (Array.isArray(evaluation.strengths)) {
-        strengthsFeedback.textContent = evaluation.strengths.join(', ');
+        const cleaned = evaluation.strengths.filter(s => !isNoiseFeedback(s));
+        strengthsFeedback.innerHTML = renderMarkdownish(cleaned.join('\n')) || 'No specific strengths noted.';
     } else {
-        strengthsFeedback.textContent = evaluation.strengths || 'No specific strengths noted.';
+        strengthsFeedback.innerHTML = renderMarkdownish(evaluation.strengths) || 'No specific strengths noted.';
     }
     
     // Format weaknesses/improvements (handling both string and array formats)
@@ -2627,11 +2842,29 @@ function displayFeedback(evaluation) {
     } else if (evaluation.improvements) {
         improv = [evaluation.improvements];
     }
-    improvementsFeedback.textContent = improv.length ? improv.join(', ') : 'No specific improvements suggested.';
+    improv = improv.filter(s => !isNoiseFeedback(s));
+    improvementsFeedback.innerHTML = improv.length ? renderMarkdownish(improv.join('\n')) : 'No specific improvements suggested.';
     
     // Set content and tone feedback from the detailed feedback field
-    contentFeedback.textContent = evaluation.feedback || 'No content feedback available.';
-    toneFeedback.textContent = evaluation.example_improvement || 'No tone feedback available.';
+    const feedbackHtml = renderMarkdownish(evaluation.feedback || '');
+    if (contentFeedback) {
+        if (feedbackHtml) {
+            contentFeedback.innerHTML = feedbackHtml;
+            contentFeedback.classList.add('prose', 'prose-indigo', 'max-w-none');
+        } else {
+            contentFeedback.textContent = 'No content feedback available.';
+        }
+    }
+    const toneText = evaluation.example_improvement || evaluation.why_asked || '';
+    if (toneFeedback) {
+        const toneHtml = renderMarkdownish(toneText || '');
+        if (toneHtml) {
+            toneFeedback.innerHTML = toneHtml;
+            toneFeedback.classList.add('prose', 'prose-indigo', 'max-w-none');
+        } else {
+            toneFeedback.textContent = 'No tone feedback available.';
+        }
+    }
     
     // Parity extras for voice/typed
     try {
@@ -2765,7 +2998,7 @@ function buildCoachFeedbackMarkdown(raw, question) {
         let m;
         while ((m = re.exec(text)) !== null) {
             const key = (m[2] || '').toLowerCase();
-            const value = (m[3] || '').trim();
+            const value = cleanFeedbackFragment(m[3] || '');
             if (parts.hasOwnProperty(key)) parts[key] = value;
         }
     } catch (_) {}
@@ -2775,19 +3008,20 @@ function buildCoachFeedbackMarkdown(raw, question) {
     if (rIdx >= 0) {
         const after = text.slice(rIdx + "here's a refined version:".length);
         const tipBreak = after.toLowerCase().indexOf("here's a tip:");
-        refined = (tipBreak >= 0 ? after.slice(0, tipBreak) : after).trim();
+        refined = cleanFeedbackFragment(tipBreak >= 0 ? after.slice(0, tipBreak) : after);
     }
     let tip = '';
     const tIdx = text.toLowerCase().indexOf("here's a tip:");
-    if (tIdx >= 0) tip = text.slice(tIdx + "here's a tip:".length).trim();
+    if (tIdx >= 0) tip = cleanFeedbackFragment(text.slice(tIdx + "here's a tip:".length));
 
     let md = '## Coach Feedback\n\n';
     if (question) md += `Question: ${question}\n\n`;
     if (refined) md += refined + "\n\n";
     ['situation','task','action','result','impact'].forEach((k) => {
-        if (parts[k]) {
+        const v = cleanFeedbackFragment(parts[k]);
+        if (v) {
             const label = k.charAt(0).toUpperCase() + k.slice(1);
-            md += `**${label}:** ${parts[k]}\n`;
+            md += `**${label}:** ${v}\n`;
         }
     });
     if (tip) md += `\n**Tip:** ${tip}\n`;
@@ -2904,13 +3138,25 @@ function displaySummary() {
     
     state.evaluations.forEach(ev => {
         if (ev.strengths) {
-            strengths.add(Array.isArray(ev.strengths) ? ev.strengths.join(', ') : ev.strengths);
+            if (Array.isArray(ev.strengths)) {
+                ev.strengths.forEach(s => { if (!isNoiseFeedback(s)) strengths.add(stripMarkdownish(s)); });
+            } else if (!isNoiseFeedback(ev.strengths)) {
+                strengths.add(stripMarkdownish(ev.strengths));
+            }
         }
         if (ev.weaknesses) {
-            improvements.add(Array.isArray(ev.weaknesses) ? ev.weaknesses.join(', ') : ev.weaknesses);
+            if (Array.isArray(ev.weaknesses)) {
+                ev.weaknesses.forEach(w => { if (!isNoiseFeedback(w)) improvements.add(stripMarkdownish(w)); });
+            } else if (!isNoiseFeedback(ev.weaknesses)) {
+                improvements.add(stripMarkdownish(ev.weaknesses));
+            }
         }
         if (ev.improvements && !ev.weaknesses) {
-            improvements.add(Array.isArray(ev.improvements) ? ev.improvements.join(', ') : ev.improvements);
+            if (Array.isArray(ev.improvements)) {
+                ev.improvements.forEach(w => { if (!isNoiseFeedback(w)) improvements.add(stripMarkdownish(w)); });
+            } else if (!isNoiseFeedback(ev.improvements)) {
+                improvements.add(stripMarkdownish(ev.improvements));
+            }
         }
     });
     
@@ -3088,6 +3334,7 @@ function buildQuestionRail() {
         ul.innerHTML = '';
         state.questions.forEach((q, i) => {
             const li = document.createElement('li');
+            li.title = q;
             const answered = Array.isArray(state.answers) && state.answers.some(a => a && a.question === q);
             const hasTranscript = !!(state.voice && state.voice.transcriptsByIndex && state.voice.transcriptsByIndex[i]);
             const flagged = !!(state.reviewFlags && state.reviewFlags[i]);
@@ -3096,6 +3343,7 @@ function buildQuestionRail() {
             li.className = classes.join(' ');
             const span = document.createElement('span');
             span.textContent = `${i+1}. ${q}`;
+            span.title = q;
             span.className = 'truncate';
             const badge = document.createElement('span');
             badge.textContent = flagged ? 'Review' : (answered ? 'Answered' : (hasTranscript ? 'In progress' : 'Not started'));

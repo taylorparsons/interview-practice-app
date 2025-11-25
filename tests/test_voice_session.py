@@ -199,3 +199,24 @@ def test_voice_session_server_vad_parses_thresholds(
         "prefix_padding_ms": 250,
         "silence_duration_ms": 600,
     }
+
+
+def test_voice_session_starts_from_current_question(session_factory, client, monkeypatch):
+    session_id = session_factory()
+    session = main._get_session(session_id)
+    session["questions"] = ["Q1", "Q2", "Q3", "Q4"]
+    session["current_question_index"] = 2
+    main._persist_session_state(session_id, session)
+
+    monkeypatch.setattr(main, "OPENAI_API_KEY", "test_key")
+    captured = {}
+    monkeypatch.setattr(main.httpx, "AsyncClient", _fake_async_client_factory(captured))
+
+    resp = client.post("/voice/session", json={"session_id": session_id})
+    assert resp.status_code == 200
+    payload = captured.get("json")
+    assert payload is not None
+    instructions = payload.get("instructions") or ""
+    assert 'exactly as "Q3"' in instructions
+    # Ensure question plan prioritizes the current question first
+    assert instructions.find("- Q3") < instructions.find("- Q1")

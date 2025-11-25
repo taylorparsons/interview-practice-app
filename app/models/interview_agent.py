@@ -250,21 +250,49 @@ class InterviewPracticeAgent:
                     else:
                         raise ValueError("No JSON object found")
                 except Exception:
-                    # Fallback to text response
+                    # Fallback to text response with best-effort bullet extraction
+                    bullets = self._extract_bullets(text)
+                    strengths = bullets[:2] or ["Review the content feedback for key strengths."]
+                    weaknesses = bullets[2:5] or bullets or ["Focus on clarifying structure and impact using STAR + I."]
+                    example_improvement = " ".join(weaknesses[:2]).strip() or "Tighten STAR + I structure and quantify impact."
                     evaluation = {
                         "score": 5,
-                        "strengths": ["Unable to parse structured feedback"],
-                        "weaknesses": ["Unable to parse structured feedback"],
+                        "strengths": strengths,
+                        "weaknesses": weaknesses,
                         "feedback": text,
-                        "example_improvement": "N/A",
+                        "example_improvement": example_improvement,
                         "why_asked": ""
                     }
-                    logger.info("Using fallback evaluation (text only)")
+                    logger.info("Using fallback evaluation (text only, parsed heuristically)")
         
         # Store feedback in history
         self.feedback_history.append(evaluation)
         
         return evaluation
+
+    def _extract_bullets(self, text: str) -> List[str]:
+        """Best-effort extraction of bullet/sentence fragments from free-form feedback."""
+        bullets: List[str] = []
+        for line in text.splitlines():
+            l = line.strip()
+            if not l:
+                continue
+            bullet_match = re.match(r"^[-*•]\s*(.+)$", l)
+            numbered_match = re.match(r"^\d+[.)]\s*(.+)$", l)
+            if bullet_match:
+                bullets.append(bullet_match.group(1).strip())
+            elif numbered_match:
+                bullets.append(numbered_match.group(1).strip())
+        if not bullets:
+            # Fall back to sentence chunks
+            sentences = re.split(r"(?<=[.!?])\s+", text)
+            for s in sentences:
+                s = (s or "").strip()
+                if len(s) > 20:
+                    bullets.append(s)
+                if len(bullets) >= 6:
+                    break
+        return bullets
     
     async def generate_example_answer(self, question: str) -> str:
         """Generate an example good answer to an interview question."""

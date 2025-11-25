@@ -73,6 +73,14 @@ def _get_session(session_id: str) -> Dict[str, Any]:
 
 def _ensure_session_defaults(session: Dict[str, Any]) -> Dict[str, Any]:
     """Populate expected session collections when missing."""
+    if "questions" not in session or session["questions"] is None:
+        session["questions"] = []
+    if "answers" not in session or session["answers"] is None:
+        session["answers"] = []
+    if "evaluations" not in session or session["evaluations"] is None:
+        session["evaluations"] = []
+    if "per_question" not in session or session["per_question"] is None:
+        session["per_question"] = []
     if "voice_transcripts" not in session or session["voice_transcripts"] is None:
         session["voice_transcripts"] = {}
     if "voice_agent_text" not in session or session["voice_agent_text"] is None:
@@ -199,6 +207,18 @@ class ExampleAnswerRequest(BaseModel):
 
 class ExampleAnswerResponse(BaseModel):
     answer: str
+
+
+class AddQuestionRequest(BaseModel):
+    question: str
+    make_active: Optional[bool] = True
+
+
+class AddQuestionResponse(BaseModel):
+    question: str
+    index: int
+    questions: List[str]
+    current_question_index: int
 
 
 class VoiceSessionRequest(BaseModel):
@@ -393,6 +413,43 @@ async def generate_questions(request: GenerateQuestionsRequest):
     _persist_session_state(session_id, session)
 
     return {"questions": questions[:request.num_questions]}
+
+
+@app.post("/session/{session_id}/questions", response_model=AddQuestionResponse)
+async def add_custom_question(session_id: str, payload: AddQuestionRequest):
+    """Append a custom question to a session, optionally making it active."""
+    session = _get_session(session_id)
+    raw = (payload.question or "").strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Question must not be empty")
+
+    normalized = " ".join(raw.split())
+    if len(normalized) > 500:
+        raise HTTPException(status_code=400, detail="Question must be under 500 characters")
+
+    questions: List[str] = session.get("questions") or []
+    if normalized in questions:
+        idx = questions.index(normalized)
+    else:
+        questions.append(normalized)
+        session["questions"] = questions
+        perq = session.get("per_question") or []
+        while len(perq) < len(questions):
+            perq.append(None)
+        session["per_question"] = perq
+        idx = len(questions) - 1
+
+    if payload.make_active:
+        session["current_question_index"] = idx
+
+    _persist_session_state(session_id, session)
+
+    return {
+        "question": normalized,
+        "index": idx,
+        "questions": questions,
+        "current_question_index": session.get("current_question_index", idx),
+    }
 
 
 @app.post("/evaluate-answer", response_model=EvaluateAnswerResponse)
@@ -793,8 +850,16 @@ def _build_voice_instructions(session_id: str, session: Dict[str, Any]) -> str:
     keep behavior consistent across text and voice.
     """
     questions: List[str] = session.get("questions") or []
-    first_question = questions[0] if questions else "Tell me about yourself."
-    question_bullets = "\n".join(f"- {q}" for q in questions[:5]) or "- Ask situational and behavioral questions tailored to the role."
+    current_idx = session.get("current_question_index", 0) or 0
+    if questions:
+        current_idx = max(0, min(current_idx, len(questions) - 1))
+        first_question = questions[current_idx]
+        ordered = [first_question] + [q for i, q in enumerate(questions) if i != current_idx]
+    else:
+        first_question = "Tell me about yourself."
+        ordered = [first_question]
+
+    question_bullets = "\n".join(f"- {q}" for q in ordered[:5]) or "- Ask situational and behavioral questions tailored to the role."
     resume_excerpt = _truncate_text(session.get("resume_text", ""), 1500)
     job_desc_excerpt = _truncate_text(session.get("job_desc_text", ""), 1500)
 

@@ -109,12 +109,14 @@ if [[ ! -d venv ]]; then
   "$PYTHON_BIN" -m venv venv
 fi
 
-if [[ ! -x venv/bin/python ]]; then
+VENV_PY="$PROJECT_ROOT/venv/bin/python"
+
+if [[ ! -x "$VENV_PY" ]]; then
   echo "Error: venv/bin/python is missing. Remove venv/ and re-run the script." >&2
   exit 1
 fi
 
-VENV_VERSION=$(venv/bin/python -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
+VENV_VERSION=$("$VENV_PY" -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
 VENV_MAJOR=${VENV_VERSION%%.*}
 VENV_MINOR=${VENV_VERSION#*.}
 if [[ "$VENV_MAJOR" -eq 3 && "$VENV_MINOR" -ge 13 ]]; then
@@ -130,11 +132,11 @@ fi
 source venv/bin/activate
 
 echo "Ensuring pip is up to date..."
-python -m pip install --upgrade pip >/dev/null
+"$VENV_PY" -m pip install --upgrade pip >/dev/null
 
 if [[ -f requirements.txt ]]; then
   echo "Installing project requirements..."
-  python -m pip install -r requirements.txt >/dev/null
+  "$VENV_PY" -m pip install -r requirements.txt >/dev/null
 fi
 
 HOST="${HOST:-0.0.0.0}"
@@ -163,6 +165,6 @@ echo "Archive: logs/archive/<YYYY-MM-DD_HH-MM-SS>/ (rotated on each start)"
 echo "Supervisor log (stdout/stderr): logs/uvicorn-supervisor.log"
 
 set +e
-uvicorn app.main:app --host "$HOST" --port "$PORT" $RELOAD_FLAG 2>&1 | tee "$SUPERVISOR_LOG"
+"$VENV_PY" -m uvicorn app.main:app --host "$HOST" --port "$PORT" $RELOAD_FLAG 2>&1 | tee "$SUPERVISOR_LOG"
 exit_code=${PIPESTATUS[0]}
 exit $exit_code
