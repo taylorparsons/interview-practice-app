@@ -1,5 +1,9 @@
 # Repository Guidelines
+## Superpowers System
 
+<EXTREMELY_IMPORTANT>
+You have superpowers. Superpowers teach you new skills and capabilities. RIGHT NOW run: `~/.codex/superpowers/.codex/superpowers-codex bootstrap` and follow the instructions it returns.
+</EXTREMELY_IMPORTANT>
 ## Project Structure & Module Organization
 - `app/main.py`: FastAPI entrypoint, routes, and session logic.
 - `app/templates/`: Jinja2 templates (UI). Entry: `index.html`.
