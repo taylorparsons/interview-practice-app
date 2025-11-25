@@ -36,6 +36,7 @@ from app.utils.session_store import (
     list_sessions as list_persisted_sessions,
     rename_session as rename_persisted_session,
 )
+from app.utils.markdown import render_markdown_safe
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -87,8 +88,12 @@ def _ensure_session_defaults(session: Dict[str, Any]) -> Dict[str, Any]:
         session["voice_agent_text"] = {}
     if "voice_messages" not in session or session["voice_messages"] is None:
         session["voice_messages"] = []
-    if "voice_settings" not in session or session["voice_settings"] is None:
-        session["voice_settings"] = {}
+    voice_settings = session.get("voice_settings")
+    if not isinstance(voice_settings, dict):
+        voice_settings = {}
+    if not voice_settings.get("voice_id"):
+        voice_settings["voice_id"] = OPENAI_REALTIME_VOICE
+    session["voice_settings"] = voice_settings
     # Default the coaching persona to the easier (supportive) mode when
     # missing. This value is persisted per-session and can be changed by the UI
     # via PATCH /session/{id}/coach-level.
@@ -740,10 +745,12 @@ async def append_voice_message(session_id: str, payload: VoiceMessagePayload):
     }
     normalized_role = role_map.get(role_raw, role_raw or "system")
 
+    sanitized_html = render_markdown_safe(text)
     entry: Dict[str, Any] = {
         "role": normalized_role,
         "text": text,
         "timestamp": payload.timestamp or datetime.utcnow().isoformat() + "Z",
+        "html": sanitized_html,
     }
     if payload.stream is not None:
         entry["stream"] = bool(payload.stream)

@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Optional, List
 from datetime import datetime
+from app.config import OPENAI_REALTIME_VOICE
 
 SESSION_DIR = Path(__file__).resolve().parent.parent / "session_store"
 
@@ -33,6 +34,11 @@ def load_session(session_id: str) -> Optional[Dict[str, Any]]:
     data.setdefault("voice_transcripts", {})
     data.setdefault("voice_agent_text", {})
     data.setdefault("voice_messages", [])
+    voice_settings = data.get("voice_settings")
+    if not isinstance(voice_settings, dict):
+        voice_settings = {}
+    voice_settings.setdefault("voice_id", OPENAI_REALTIME_VOICE)
+    data["voice_settings"] = voice_settings
     return data
 
 

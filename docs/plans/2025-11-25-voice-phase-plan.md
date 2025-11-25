@@ -146,3 +146,4 @@
 - Manual smoke: voice session with transcripts, Practice Again flow, model/voice switch mid-session (applies next prompt), PDF export <5s for <=15 questions.
 - Logging/telemetry: ensure structured logs for model/voice changes, practice-again triggers, PDF attempts.
 - Backward compatibility: verify loading legacy session without new fields does not error.
+- TODO (post-release): tighten evaluation prompt + JSON schema (Pydantic/JSON schema enforcement) to reduce non-JSON `evaluate_answer` warnings and ensure compliant responses. Validate with a dedicated test that retries are minimal and fallbacks log at INFO or lower.

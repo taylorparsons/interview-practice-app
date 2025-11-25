@@ -656,6 +656,7 @@ function appendVoiceMessage(role, message, options = {}) {
     }
 
     const text = message.trim();
+    const safeHtml = options.html;
     if (!text) {
         return null;
     }
@@ -695,11 +696,15 @@ function appendVoiceMessage(role, message, options = {}) {
 
         const content = document.createElement('p');
         if (displayRole === 'agent') {
-            const htmlCoach = formatCoachDisplay(text);
-            if (htmlCoach) {
-                content.innerHTML = htmlCoach;
+            if (safeHtml) {
+                content.innerHTML = safeHtml;
             } else {
-                content.textContent = text;
+                const htmlCoach = formatCoachDisplay(text);
+                if (htmlCoach) {
+                    content.innerHTML = htmlCoach;
+                } else {
+                    content.textContent = text;
+                }
             }
         } else {
             content.textContent = text;
@@ -740,6 +745,9 @@ function appendVoiceMessage(role, message, options = {}) {
         timestamp: new Date().toISOString(),
         stream: !!options.stream,
     };
+    if (safeHtml && displayRole === 'agent') {
+        entry.html = safeHtml;
+    }
     if (Number.isInteger(qIndex)) {
         entry.question_index = qIndex;
         if (state.questions && state.questions[qIndex]) {
@@ -1116,7 +1124,7 @@ function hydrateVoiceMessagesFromSession(sessionData) {
                 }
             }
         }
-        const result = appendVoiceMessage(role, msg.text, { stream: !!msg.stream });
+        const result = appendVoiceMessage(role, msg.text, { stream: !!msg.stream, html: msg.html });
         if (result && state.voice.messages[result.entryIndex]) {
             if (msg.timestamp) {
                 state.voice.messages[result.entryIndex].timestamp = msg.timestamp;
@@ -1124,13 +1132,20 @@ function hydrateVoiceMessagesFromSession(sessionData) {
             if (typeof msg.question_index === 'number') {
                 state.voice.messages[result.entryIndex].question_index = msg.question_index;
             }
+            if (msg.html && (role === 'coach' || role === 'agent')) {
+                state.voice.messages[result.entryIndex].html = msg.html;
+            }
             // Apply STAR+I formatting to hydrated Coach bubbles for consistency
             try {
                 if (role === 'coach' || role === 'agent') {
                     const p = result.wrapper && result.wrapper.querySelector('p');
                     if (p) {
-                        const html = renderCoachTranscriptHtml(msg.text);
-                        if (html) p.innerHTML = html;
+                        if (msg.html) {
+                            p.innerHTML = msg.html;
+                        } else {
+                            const html = renderCoachTranscriptHtml(msg.text);
+                            if (html) p.innerHTML = html;
+                        }
                     }
                 }
             } catch (_) { /* formatting is best-effort */ }
