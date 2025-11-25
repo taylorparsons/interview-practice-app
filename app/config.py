@@ -35,9 +35,10 @@ OPENAI_REALTIME_VOICE = os.getenv("OPENAI_REALTIME_VOICE", "verse").strip()
 OPENAI_REALTIME_URL = os.getenv("OPENAI_REALTIME_URL", "https://api.openai.com/v1/realtime").strip()
 
 OPENAI_TURN_DETECTION = os.getenv("OPENAI_TURN_DETECTION", "server_vad").strip()
-OPENAI_TURN_THRESHOLD = os.getenv("OPENAI_TURN_THRESHOLD", "0.5").strip()
-OPENAI_TURN_PREFIX_MS = os.getenv("OPENAI_TURN_PREFIX_MS", "300").strip()
-OPENAI_TURN_SILENCE_MS = os.getenv("OPENAI_TURN_SILENCE_MS", "500").strip()
+# Raise defaults to reduce interruptions and wait longer before the coach replies.
+OPENAI_TURN_THRESHOLD = os.getenv("OPENAI_TURN_THRESHOLD", "0.55").strip()
+OPENAI_TURN_PREFIX_MS = os.getenv("OPENAI_TURN_PREFIX_MS", "400").strip()
+OPENAI_TURN_SILENCE_MS = os.getenv("OPENAI_TURN_SILENCE_MS", "1200").strip()
 
 # Optional: enable server-side input audio transcription for realtime WebRTC
 # Defaults to a lightweight transcribe model; set to empty to disable.

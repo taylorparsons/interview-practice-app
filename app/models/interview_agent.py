@@ -178,13 +178,28 @@ class InterviewPracticeAgent:
         vt_block = f"\n\nVoice Transcript (if any):\n{vt}\n" if vt else ""
 
         user_prompt = f"""
-        Interview Question: {question}
-        
-        Candidate's Answer: {answer}
-        {vt_block}
-        
-        Please evaluate this response.
-        """
+Evaluate the interview answer using this rubric (integer score 1-10 only):
+- 9-10: Excellent STAR+I, crisp actions, quantified impact, tailored to role.
+- 7-8: Strong but could tighten clarity or metrics.
+- 5-6: Needs better structure and specific, measurable impact.
+- 3-4: Weak; STAR+I gaps and unclear outcomes.
+- 1-2: Very poor/irrelevant.
+
+Return ONLY JSON in this shape:
+{{
+  "score": <integer 1-10>,
+  "strengths": ["..."],
+  "weaknesses": ["..."],
+  "feedback": "...",            # concise coaching notes
+  "example_improvement": "...", # tone/delivery tips
+  "why_asked": "..."            # why this question matters
+}}
+
+Interview Question: {question}
+
+Candidate's Answer: {answer}
+{vt_block}
+"""
         
         logger.info("Evaluating answer for question: %s (level=%s)", question, level)
         
@@ -264,7 +279,10 @@ class InterviewPracticeAgent:
                         "why_asked": ""
                     }
                     logger.info("Using fallback evaluation (text only, parsed heuristically)")
-        
+
+        # Normalize/clip score to 1-10
+        evaluation["score"] = self._coerce_score(evaluation.get("score"), text)
+
         # Store feedback in history
         self.feedback_history.append(evaluation)
         
@@ -293,6 +311,26 @@ class InterviewPracticeAgent:
                 if len(bullets) >= 6:
                     break
         return bullets
+
+    def _coerce_score(self, value: Any, text: str) -> int:
+        """Return a safe integer score 1-10, using heuristics when missing."""
+        try:
+            score = int(value)
+        except Exception:
+            score = None
+
+        if score is None:
+            match = re.search(r"\b([1-9]|10)\b", text)
+            if match:
+                try:
+                    score = int(match.group(1))
+                except Exception:
+                    score = None
+        if score is None:
+            score = 5
+
+        score = max(1, min(10, score))
+        return score
     
     async def generate_example_answer(self, question: str) -> str:
         """Generate an example good answer to an interview question."""

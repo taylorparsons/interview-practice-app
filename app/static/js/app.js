@@ -115,6 +115,7 @@ const exampleQuestion = document.getElementById('example-question');
 
 const averageScore = document.getElementById('average-score');
 const averageScoreBar = document.getElementById('average-score-bar');
+const scoreExplanation = document.getElementById('score-explanation');
 const overallStrengths = document.getElementById('overall-strengths');
 const overallImprovements = document.getElementById('overall-improvements');
 
@@ -692,9 +693,18 @@ function appendVoiceMessage(role, message, options = {}) {
         label.textContent = displayRole === 'agent' ? 'Coach' : 'You';
         wrapper.appendChild(label);
 
-            const content = document.createElement('p');
+        const content = document.createElement('p');
+        if (displayRole === 'agent') {
+            const htmlCoach = formatCoachDisplay(text);
+            if (htmlCoach) {
+                content.innerHTML = htmlCoach;
+            } else {
+                content.textContent = text;
+            }
+        } else {
             content.textContent = text;
-            wrapper.appendChild(content);
+        }
+        wrapper.appendChild(content);
             if (state.voice && state.voice.config && state.voice.config.showMetadata && options.meta) {
             const meta = options.meta || {};
             const parts = [];
@@ -800,12 +810,9 @@ function finalizeAgentMessage() {
 
     if (active && active.element) {
         // Format coach text (STAR + I) into readable lines within the bubble
-        const html = renderCoachTranscriptHtml(finalText);
-        if (html) {
-            active.element.innerHTML = html;
-        } else {
-            active.element.textContent = finalText;
-        }
+        const html = formatCoachDisplay(finalText);
+        if (html) { active.element.innerHTML = html; }
+        else { active.element.textContent = finalText; }
     }
     if (
         active &&
@@ -1063,6 +1070,16 @@ function renderCoachTranscriptHtml(text) {
     return html;
 }
 
+function formatCoachDisplay(text) {
+    if (!text) return '';
+    const withBreaks = String(text).replace(/:\s+/g, ':\n').trim();
+    const starHtml = renderCoachTranscriptHtml(withBreaks);
+    if (starHtml) return starHtml;
+    const mdHtml = renderMarkdownish(withBreaks);
+    if (mdHtml) return mdHtml;
+    return escapeHtml(withBreaks);
+}
+
 function hydrateVoiceMessagesFromSession(sessionData) {
     if (!sessionData) {
         return;
@@ -1202,7 +1219,7 @@ async function startVoiceInterview() {
                     type: 'response.create',
                     response: {
                         modalities: ['audio', 'text'],
-                        instructions: `Begin the interview. Greet the candidate and ask: "${openingQuestion}". Wait for their response before giving concise feedback.`,
+                        instructions: `Begin the interview. Greet the candidate and ask: "${openingQuestion}". Do not interrupt while they are speaking; wait for a clear pause or when they indicate they are done before responding. Keep feedback concise and under 20 seconds.`,
                     }
                 }));
             } catch (sendError) {
@@ -2558,6 +2575,11 @@ function renderMarkdownish(text) {
     return String(text).replace(/\n/g, '<br>');
 }
 
+function breakAfterColon(text) {
+    if (!text) return '';
+    return String(text).replace(/:\s+/g, ':\n').trim();
+}
+
 function stripMarkdownish(text) {
     if (!text) return '';
     let out = String(text);
@@ -2579,6 +2601,16 @@ function isNoiseFeedback(str) {
     const normalized = String(str).trim();
     if (!normalized) return true;
     return feedbackNoiseTokens.has(normalized);
+}
+
+function scoreMeaning(score) {
+    const s = Number(score);
+    if (Number.isNaN(s)) return '';
+    if (s >= 9) return 'Excellent STAR+I story with clear impact';
+    if (s >= 7) return 'Strong answer; tighten clarity or metrics';
+    if (s >= 5) return 'Needs better structure and quantifiable impact';
+    if (s >= 3) return 'Weak; missing STAR+I clarity and outcomes';
+    return 'Unclear response; rebuild with STAR+I and metrics';
 }
 
 function setCustomQuestionStatus(message, tone = 'success') {
@@ -2822,13 +2854,18 @@ function displayFeedback(evaluation) {
     // Set feedback values
     scoreValue.textContent = `${evaluation.score}/10`;
     scoreBar.style.width = `${evaluation.score * 10}%`;
+    if (scoreExplanation) {
+        scoreExplanation.textContent = scoreMeaning(evaluation.score);
+    }
     
     // Format strengths (handling both string and array formats)
     if (Array.isArray(evaluation.strengths)) {
-        const cleaned = evaluation.strengths.filter(s => !isNoiseFeedback(s));
+        const cleaned = evaluation.strengths
+            .filter(s => !isNoiseFeedback(s))
+            .map(breakAfterColon);
         strengthsFeedback.innerHTML = renderMarkdownish(cleaned.join('\n')) || 'No specific strengths noted.';
     } else {
-        strengthsFeedback.innerHTML = renderMarkdownish(evaluation.strengths) || 'No specific strengths noted.';
+        strengthsFeedback.innerHTML = renderMarkdownish(breakAfterColon(evaluation.strengths)) || 'No specific strengths noted.';
     }
     
     // Format weaknesses/improvements (handling both string and array formats)
@@ -2843,7 +2880,7 @@ function displayFeedback(evaluation) {
         improv = [evaluation.improvements];
     }
     improv = improv.filter(s => !isNoiseFeedback(s));
-    improvementsFeedback.innerHTML = improv.length ? renderMarkdownish(improv.join('\n')) : 'No specific improvements suggested.';
+    improvementsFeedback.innerHTML = improv.length ? renderMarkdownish(improv.map(breakAfterColon).join('\n')) : 'No specific improvements suggested.';
     
     // Set content and tone feedback from the detailed feedback field
     const feedbackHtml = renderMarkdownish(evaluation.feedback || '');
@@ -3196,11 +3233,11 @@ function buildPerQuestionCards() {
             questions.forEach((q, i) => {
                 const ev = evals[i] || {};
                 const score = typeof ev.score === 'number' ? ev.score : '';
-                const strengths = Array.isArray(ev.strengths) ? ev.strengths : (ev.strengths ? [ev.strengths] : []);
-                const weaknesses = Array.isArray(ev.weaknesses) ? ev.weaknesses : (ev.weaknesses ? [ev.weaknesses] : []);
-                const why = ev.why_asked || '';
-                const example = ev.example_improvement || '';
-                const t = transcripts[String(i)] || '';
+        const strengths = Array.isArray(ev.strengths) ? ev.strengths : (ev.strengths ? [ev.strengths] : []);
+        const weaknesses = Array.isArray(ev.weaknesses) ? ev.weaknesses : (ev.weaknesses ? [ev.weaknesses] : []);
+        const why = ev.why_asked || '';
+        const example = ev.example_improvement || '';
+        const t = transcripts[String(i)] || '';
 
                 const card = document.createElement('div');
                 card.className = 'p-4 border border-gray-200 rounded-lg bg-white';
@@ -3221,7 +3258,7 @@ function buildPerQuestionCards() {
                     const s = document.createElement('div');
                     s.className = 'mb-2';
                     s.innerHTML = '<div class="text-sm font-medium text-green-700 mb-1">What went well</div>' +
-                        '<ul class="list-disc list-inside text-sm text-gray-800">' + strengths.map(escapeHtml).map(x => `<li>${x}</li>`).join('') + '</ul>';
+                        '<ul class="list-disc list-inside text-sm text-gray-800">' + strengths.map(x => breakAfterColon(x)).map(escapeHtml).map(x => `<li>${x}</li>`).join('') + '</ul>';
                     card.appendChild(s);
                 }
 
@@ -3229,7 +3266,7 @@ function buildPerQuestionCards() {
                     const w = document.createElement('div');
                     w.className = 'mb-2';
                     w.innerHTML = '<div class="text-sm font-medium text-amber-700 mb-1">What to improve</div>' +
-                        '<ul class="list-disc list-inside text-sm text-gray-800">' + weaknesses.map(escapeHtml).map(x => `<li>${x}</li>`).join('') + '</ul>';
+                        '<ul class="list-disc list-inside text-sm text-gray-800">' + weaknesses.map(x => breakAfterColon(x)).map(escapeHtml).map(x => `<li>${x}</li>`).join('') + '</ul>';
                     card.appendChild(w);
                 }
 

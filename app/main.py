@@ -882,7 +882,7 @@ Interview question plan:
 
 # Realtime Guidance:
 Conduct a conversational mock interview. Start with a brief greeting, then ask the first question exactly as "{first_question}".
-Listen to the candidate's voice response. After they finish, provide concise, constructive feedback and practical tips (under 4 sentences).
+Listen to the candidate's voice response. Do not interrupt the candidate while they are speaking; wait for a clear pause or completion before replying. Keep spoken feedback concise (under 20 seconds) and constructive (under 4 sentences).
 Proceed through the remaining questions naturally. If the candidate asks for clarification or coaching, offer targeted guidance.
 Keep responses under 30 seconds and always send a short text summary alongside audio so the UI can display the feedback.
 Wrap up when the candidate indicates they are done or when the planned questions are covered.
