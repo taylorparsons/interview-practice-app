@@ -50,6 +50,7 @@ def test_export_pdf(monkeypatch, tmp_path):
     assert res.headers.get("content-type") == "application/pdf"
     assert res.headers.get("content-disposition", "").startswith("attachment; filename=")
     assert res.content.startswith(b"%PDF-FAKE%")
+    assert "hi" in (called.get("html") or "")
 
     session = main._get_session(sid)
     exports = session.get("pdf_exports") or []

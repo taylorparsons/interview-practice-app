@@ -148,3 +148,4 @@
 - Logging/telemetry: ensure structured logs for model/voice changes, practice-again triggers, PDF attempts.
 - Backward compatibility: verify loading legacy session without new fields does not error.
 - TODO (post-release): tighten evaluation prompt + JSON schema (Pydantic/JSON schema enforcement) to reduce non-JSON `evaluate_answer` warnings and ensure compliant responses. Validate with a dedicated test that retries are minimal and fallbacks log at INFO or lower.
+- TODO (post-release): Persist UI summary payloads (overall strengths/improvements/tone) server-side and include them in PDF export so server PDF matches client summary view.

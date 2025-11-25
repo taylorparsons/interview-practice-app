@@ -142,7 +142,6 @@ const voiceActivityLabel = voiceActivityIndicator
     : null;
 const toggleBrowserAsr = document.getElementById('toggle-browser-asr');
 const toggleShowMetadata = document.getElementById('toggle-show-metadata');
-const exportTranscriptBtn = document.getElementById('export-transcript');
 const voiceSelect = document.getElementById('voice-select');
 const voicePreviewBtn = document.getElementById('voice-preview');
 const voiceSaveBtn = document.getElementById('voice-save');

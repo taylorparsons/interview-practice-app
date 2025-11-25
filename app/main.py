@@ -1148,11 +1148,94 @@ async def export_pdf(session_id: str, background_tasks: BackgroundTasks, request
         "name": session.get("name") or f"Session {session_id[:8]}",
         "questions": session.get("questions") or [],
         "answers": session.get("answers") or [],
-        "evaluations": session.get("evaluations") or [],
+        "answers_combined": [],
+        "evaluations": [],
         "voice_messages": session.get("voice_messages") or [],
         "created_at": session.get("created_at"),
         "updated_at": session.get("updated_at"),
     }
+
+    questions = context["questions"]
+    answers = context["answers"]
+    raw_voice_messages = context["voice_messages"]
+    voice_messages: List[Dict[str, Any]] = []
+    for m in raw_voice_messages:
+        if not isinstance(m, dict):
+            continue
+        copied = dict(m)
+        copied["html"] = render_markdown_safe(m.get("text", ""))
+        voice_messages.append(copied)
+    context["voice_messages"] = voice_messages
+    voice_transcripts = session.get("voice_transcripts") or {}
+    combined: List[Dict[str, Any]] = []
+    for idx, _q in enumerate(questions):
+        typed_answer = None
+        try:
+            if idx < len(answers):
+                typed_answer = answers[idx].get("answer")
+        except Exception:
+            typed_answer = None
+        if typed_answer:
+            combined.append({"answer": typed_answer, "source": "typed"})
+            continue
+
+        # Prefer candidate voice messages for this question index
+        candidate_msgs = [
+            (m.get("text") or "").strip()
+            for m in voice_messages
+            if m and (m.get("role") in {"candidate", "user"}) and m.get("question_index") == idx
+        ]
+        candidate_msgs = [m for m in candidate_msgs if m]
+        if candidate_msgs:
+            combined.append({"answer": " ".join(candidate_msgs).strip(), "source": "voice"})
+            continue
+
+        vt = (voice_transcripts.get(str(idx)) or "").strip()
+        if vt:
+            combined.append({"answer": vt, "source": "voice"})
+        else:
+            combined.append({"answer": "", "source": "none"})
+
+    context["answers_combined"] = combined
+
+    evals_raw = session.get("evaluations") or []
+    evals_rendered: List[Dict[str, Any]] = []
+    strengths_agg = set()
+    improvements_agg = set()
+    total_score = 0
+    score_count = 0
+    for e in evals_raw:
+        entry = dict(e)
+        entry["feedback_html"] = render_markdown_safe(e.get("feedback", ""))
+        entry["example_improvement_html"] = render_markdown_safe(e.get("example_improvement", ""))
+        try:
+            score_val = float(e.get("score"))
+            total_score += score_val
+            score_count += 1
+        except Exception:
+            pass
+
+        for s in e.get("strengths") or []:
+            if isinstance(s, str):
+                s_clean = s.strip()
+                if s_clean:
+                    strengths_agg.add(s_clean)
+        for w in e.get("weaknesses") or []:
+            if isinstance(w, str):
+                w_clean = w.strip()
+                if w_clean:
+                    improvements_agg.add(w_clean)
+        if not e.get("weaknesses"):
+            for w in e.get("improvements") or []:
+                if isinstance(w, str):
+                    w_clean = w.strip()
+                    if w_clean:
+                        improvements_agg.add(w_clean)
+        evals_rendered.append(entry)
+    context["evaluations"] = evals_rendered
+    context["summary_strengths"] = sorted(strengths_agg)
+    context["summary_improvements"] = sorted(improvements_agg)
+    context["summary_average_score"] = (total_score / score_count) if score_count else None
 
     html = template.render(**context)
     try:

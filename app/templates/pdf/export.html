@@ -12,6 +12,8 @@
       .voice { background: #f8fafc; padding: 8px; border-radius: 6px; margin-top: 6px; }
       .role { font-weight: 600; }
       ul { margin: 4px 0 8px 18px; }
+      strong { font-weight: 700; }
+      em { font-style: italic; }
       .section { margin-top: 16px; }
     </style>
   </head>
@@ -25,19 +27,42 @@
 
     <div class="section">
       <h2>Questions & Responses</h2>
+      {% if summary_average_score %}
+      <div class="card">
+        <div class="label">Summary</div>
+        <div><strong>Average score:</strong> {{ '%.1f'|format(summary_average_score) }}/10</div>
+        {% if summary_strengths and summary_strengths|length > 0 %}
+        <div class="section">
+          <div class="text-sm font-medium text-green-700 mb-1">Strengths</div>
+          <ul>
+            {% for s in summary_strengths %}<li>{{ s }}</li>{% endfor %}
+          </ul>
+        </div>
+        {% endif %}
+        {% if summary_improvements and summary_improvements|length > 0 %}
+        <div class="section">
+          <div class="text-sm font-medium text-amber-700 mb-1">Areas for improvement</div>
+          <ul>
+            {% for w in summary_improvements %}<li>{{ w }}</li>{% endfor %}
+          </ul>
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
       {% for q in questions %}
       <div class="card">
         <div class="label">Question {{ loop.index }}</div>
         <div class="question">{{ q }}</div>
-        {% set answer = answers[loop.index0] if loop.index0 < answers|length else None %}
-        {% if answer %}
-        <div><span class="label">Answer</span><br>{{ answer.answer }}</div>
+        {% set answer = answers_combined[loop.index0] if loop.index0 < answers_combined|length else None %}
+        {% if answer and answer.answer %}
+        <div><span class="label">Answer ({{ answer.source }})</span><br>{{ answer.answer | safe }}</div>
         {% endif %}
         {% set evaluation = evaluations[loop.index0] if loop.index0 < evaluations|length else None %}
         {% if evaluation %}
         <div class="section">
           <div class="label">Evaluation (Score {{ evaluation.score }})</div>
-          <div>{{ evaluation.feedback or "" }}</div>
+          <div>{{ evaluation.feedback_html | safe }}</div>
+          {% if evaluation.example_improvement_html %}<div class="section"><strong>Example improvement:</strong> {{ evaluation.example_improvement_html | safe }}</div>{% endif %}
           {% if evaluation.strengths %}<div><strong>Strengths:</strong> {{ evaluation.strengths|join(", ") }}</div>{% endif %}
           {% if evaluation.weaknesses %}<div><strong>Weaknesses:</strong> {{ evaluation.weaknesses|join(", ") }}</div>{% endif %}
         </div>
@@ -49,7 +74,7 @@
           {% for m in msgs %}
           <div class="voice">
             <div class="role">{{ m.role|capitalize }}</div>
-            <div>{{ m.text }}</div>
+            {% if m.html %}<div>{{ m.html | safe }}</div>{% else %}<div>{{ m.text }}</div>{% endif %}
           </div>
           {% endfor %}
         </div>
