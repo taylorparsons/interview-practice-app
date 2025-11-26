@@ -107,8 +107,8 @@ class InterviewPracticeAgent:
         log_prefix = f"session={session_id} " if session_id else ""
         logger.info("%sInitialized Interview Agent with OpenAI model: %s", log_prefix, openai_model)
     
-    async def generate_interview_questions(self, num_questions: int = 5, prompt_hint: Optional[str] = None) -> List[str]:
-        """Generate interview questions based on resume and job description."""
+    async def generate_interview_questions(self, num_questions: int = 5, prompt_hint: Optional[str] = None) -> List[Any]:
+        """Generate interview questions (with follow-up probes) based on resume and job description."""
         system_prompt = get_base_coach_prompt()
         
         hint_block = f"\nFocus on: {prompt_hint}\n" if prompt_hint else ""
@@ -122,7 +122,11 @@ class InterviewPracticeAgent:
         {hint_block}
         
         Generate {num_questions} interview questions for this candidate based on their resume and the job description.
-        Return the response as a JSON array of question strings.
+        For each, include one concise follow-up probe.
+        Return the response as a JSON array of objects:
+        [
+          {{"question": "...", "follow_up": "..." }}
+        ]
         """
         
         # Generate questions using the ChatGPT API
@@ -139,52 +143,30 @@ class InterviewPracticeAgent:
         logger.debug("Raw interview question response: %s", content)
         
         # Extract and parse the questions
+        parsed_items: List[Any] = []
         try:
-            # Try to directly parse the response as JSON
             questions_data = json.loads(content)
-            
-            # Handle both array of strings and array of objects
-            questions = []
-            for item in questions_data:
-                if isinstance(item, str):
-                    questions.append(item)
-                elif isinstance(item, dict) and "question" in item:
-                    questions.append(item["question"])
-                else:
-                    # If we can't parse it properly, just use the string representation
-                    questions.append(str(item))
-                    
+            if isinstance(questions_data, list):
+                parsed_items = questions_data
         except json.JSONDecodeError:
-            # If direct parsing fails, extract the JSON part
             try:
-                # Look for JSON array in the response
                 start_idx = content.find('[')
                 end_idx = content.rfind(']') + 1
                 if start_idx >= 0 and end_idx > start_idx:
                     questions_json = content[start_idx:end_idx]
                     questions_data = json.loads(questions_json)
-                    
-                    # Handle both array of strings and array of objects
-                    questions = []
-                    for item in questions_data:
-                        if isinstance(item, str):
-                            questions.append(item)
-                        elif isinstance(item, dict) and "question" in item:
-                            questions.append(item["question"])
-                        else:
-                            # If we can't parse it properly, just use the string representation
-                            questions.append(str(item))
-                else:
-                    # If no JSON array is found, split by newlines and clean up
-                    questions = [q.strip() for q in content.split('\n') if q.strip()]
+                    if isinstance(questions_data, list):
+                        parsed_items = questions_data
             except Exception:
-                # Fallback if all parsing attempts fail
                 logger.exception("Error parsing questions from model response")
-                questions = [content]
+                parsed_items = []
+
+        if not parsed_items:
+            parsed_items = [content] if content else []
         
-        logger.debug("Parsed interview questions: %s", questions)
-        self.interview_questions = questions
-        return questions
+        logger.debug("Parsed interview questions: %s", parsed_items)
+        self.interview_questions = parsed_items
+        return parsed_items
     
     async def evaluate_answer(self, question: str, answer: str, voice_transcript: Optional[str] = None, *, level: Optional[str] = None) -> Dict[str, Any]:
         """Evaluate candidate's answer to an interview question."""
@@ -356,9 +338,11 @@ You are now providing a tailored, exemplary answer to the candidate's interview 
 Requirements:
 - Draw directly from the candidate's resume wherever relevant (roles, companies, projects, technologies, metrics, scope, team size, timelines).
 - Align to the job description priorities and mirror key terminology for the role.
-- When applicable, structure with STAR + I (Situation, Task, Action, Result, Impact) and quantify outcomes with concrete numbers.
-- Keep tone confident, concise, and conversational (not scripted).
-- Target length ~120–220 words unless the question demands more.
+- Anchor the opening sentence so it directly answers the question with the most relevant achievement.
+- When applicable, structure with STAR + I (Situation, Task, Action, Result, Impact) and quantify outcomes with concrete numbers (e.g., "%", "$", time saved, throughput, CSAT, latency).
+- Call out generative AI/LLM usage explicitly when the question implies it (models, APIs, fine-tuning, retrieval, safety/guardrails, evaluation).
+- Include 2–3 concrete actions you took (tools, frameworks, infra), and the business/user impact.
+- Keep tone confident, concise, and conversational (not scripted). Target length ~150–220 words unless the question demands more.
 
 Output:
 - Return only the answer text, no preface, labels, or lists unless the question explicitly asks for them.
