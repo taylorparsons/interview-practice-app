@@ -50,11 +50,13 @@ def test_generate_additional_questions_appends(monkeypatch, tmp_path):
     assert res.status_code == 200
     data = res.json()
     assert data["questions"] == ["Q1", "New Q2", "New Q3"]
+    assert len(data.get("follow_ups", [])) == 3
     assert agent.calls == 1
 
     session = main._get_session(sid)
     assert session["questions"] == ["Q1", "New Q2", "New Q3"]
     assert len(session.get("per_question")) == 3
+    assert len(session.get("question_followups", [])) == 3
 
 
 def test_delete_questions_reindexes_and_cleans_state(monkeypatch, tmp_path):

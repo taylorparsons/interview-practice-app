@@ -99,6 +99,7 @@ const customQuestionInput = document.getElementById('custom-question-input');
 const addCustomQuestionBtn = document.getElementById('add-custom-question');
 const clearCustomQuestionBtn = document.getElementById('clear-custom-question');
 const customQuestionStatus = document.getElementById('custom-question-status');
+const currentFollowup = document.getElementById('current-followup');
 const generateMoreCount = document.getElementById('generate-more-count');
 const generateMoreHint = document.getElementById('generate-more-hint');
 const generateMoreBtn = document.getElementById('generate-more-btn');
@@ -2518,6 +2519,7 @@ async function syncSessionStateFromServer() {
     state.evaluations = data.evaluations || [];
     state.practice_history = data.practice_history || state.practice_history;
     state.voice_settings = data.voice_settings || state.voice_settings;
+    state.questionFollowups = data.question_followups || [];
     state.currentQuestionIndex = typeof data.current_question_index === 'number'
         ? data.current_question_index
         : state.currentQuestionIndex;
@@ -2922,7 +2924,12 @@ function displayQuestion(index) {
     state.currentQuestionIndex = index;
     const question = state.questions[index];
     
-    currentQuestion.textContent = question;
+    if (currentQuestion) currentQuestion.textContent = question;
+    if (currentFollowup) {
+        const fup = (state.questionFollowups && state.questionFollowups[index]) || '';
+        currentFollowup.textContent = fup ? `Follow-up: ${fup}` : '';
+        currentFollowup.classList.toggle('hidden', !fup);
+    }
     if (answerInput) {
         const saved = (state.answers || []).find(a => a && a.question === question);
         answerInput.value = saved ? (saved.answer || '') : '';
@@ -3167,7 +3174,8 @@ function formatExampleAnswer(answer) {
         title = 'Interview Answer',
         professionalExperience = '',
         keyHighlights = [],
-        conclusion = ''
+        conclusion = '',
+        followUps = []
     } = answer;
 
     // Build markdown formatted answer
@@ -3192,6 +3200,14 @@ function formatExampleAnswer(answer) {
         });
     }
 
+    if (followUps && followUps.length > 0) {
+        formattedAnswer += `## Follow-up probes\n`;
+        followUps.forEach((probe, idx) => {
+            formattedAnswer += `${idx + 1}. ${probe}\n`;
+        });
+        formattedAnswer += '\n';
+    }
+
     // Conclusion Section
     if (conclusion) {
         formattedAnswer += `## Conclusion\n${conclusion}`;
@@ -3210,7 +3226,19 @@ function formatPlainExampleAnswer(text) {
             const sentence = s.trim();
             if (!sentence) return;
             if (idx === 0) {
-                out += `- **${sentence}**\n`;
+                let lead = '';
+                let remainder = '';
+                const commaIdx = sentence.indexOf(',');
+                if (commaIdx > 0) {
+                    lead = sentence.slice(0, commaIdx).trim();
+                    remainder = sentence.slice(commaIdx + 1).trim();
+                } else {
+                    const words = sentence.split(/\s+/);
+                    lead = words.slice(0, 8).join(' ').trim();
+                    remainder = words.slice(8).join(' ').trim();
+                }
+                const line = `- **${lead}**${remainder ? ` ${remainder}` : ''}`;
+                out += `${line}\n`;
             } else {
                 out += `  ${sentence}\n`;
             }

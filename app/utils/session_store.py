@@ -43,6 +43,8 @@ def load_session(session_id: str) -> Optional[Dict[str, Any]]:
     voice_settings.setdefault("thinking_effort", "medium")
     voice_settings.setdefault("verbosity", "balanced")
     data["voice_settings"] = voice_settings
+    if "question_followups" not in data or data["question_followups"] is None:
+        data["question_followups"] = []
     if "practice_history" not in data or data["practice_history"] is None:
         data["practice_history"] = []
     if "pdf_exports" not in data or data["pdf_exports"] is None:

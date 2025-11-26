@@ -79,6 +79,8 @@ def _ensure_session_defaults(session: Dict[str, Any]) -> Dict[str, Any]:
     """Populate expected session collections when missing."""
     if "questions" not in session or session["questions"] is None:
         session["questions"] = []
+    if "question_followups" not in session or session["question_followups"] is None:
+        session["question_followups"] = []
     if "answers" not in session or session["answers"] is None:
         session["answers"] = []
     if "evaluations" not in session or session["evaluations"] is None:
@@ -258,6 +260,7 @@ class GenerateQuestionsRequest(BaseModel):
 
 class GenerateQuestionsResponse(BaseModel):
     questions: List[str]
+    follow_ups: Optional[List[str]] = None
 
 
 class EvaluateAnswerRequest(BaseModel):
@@ -503,6 +506,7 @@ async def upload_documents(
         "job_desc_text": job_desc_text,
         "name": default_name,
         "questions": [],
+        "question_followups": [],
         "answers": [],
         "evaluations": [],
         "agent": None,
@@ -543,13 +547,28 @@ async def generate_questions(request: GenerateQuestionsRequest):
     if session.get("agent") is not None:
         try:
             agent = session["agent"]
-            questions = await agent.generate_interview_questions(request.num_questions)
+            items = await agent.generate_interview_questions(request.num_questions)
+            questions: List[str] = []
+            followups: List[str] = []
+            for item in items or []:
+                if isinstance(item, dict) and item.get("question"):
+                    q = (item.get("question") or "").strip()
+                    fup = (item.get("follow_up") or "").strip()
+                    if q:
+                        questions.append(q)
+                        followups.append(fup)
+                elif isinstance(item, str):
+                    q = item.strip()
+                    if q:
+                        questions.append(q)
+                        followups.append("")
 
             session["questions"] = questions
+            session["question_followups"] = followups
             session["current_question_index"] = 0
             _persist_session_state(session_id, session)
 
-            return {"questions": questions}
+            return {"questions": questions, "follow_ups": followups}
         except Exception:
             logger.exception("Error using agent to generate questions for session %s", session_id)
 
@@ -578,10 +597,11 @@ async def generate_questions(request: GenerateQuestionsRequest):
                 questions[i+2] = question  # Keep the first two default questions
     
     session["questions"] = questions
+    session["question_followups"] = [""] * len(questions)
     session["current_question_index"] = 0
     _persist_session_state(session_id, session)
 
-    return {"questions": questions[:request.num_questions]}
+    return {"questions": questions[:request.num_questions], "follow_ups": session["question_followups"][:request.num_questions]}
 
 
 @app.post("/session/{session_id}/questions", response_model=AddQuestionResponse)
@@ -626,9 +646,13 @@ async def generate_additional_questions(session_id: str, payload: GenerateMoreQu
     """Generate and append additional interview questions mid-session."""
     session = _get_session(session_id)
     questions: List[str] = session.get("questions") or []
+    followups: List[str] = session.get("question_followups") or []
+    while len(followups) < len(questions):
+        followups.append("")
 
     # Try to use the agent if available; otherwise, attempt to start it
     generated: List[str] = []
+    generated_followups: List[str] = []
     session = await _ensure_agent_ready(session_id, session)
     agent = session.get("agent")
     if agent is not None:
@@ -638,20 +662,29 @@ async def generate_additional_questions(session_id: str, payload: GenerateMoreQu
                 prompt_hint=payload.prompt_hint,
             )
             for q in raw_new or []:
-                normalized = " ".join((q or "").split()).strip()
+                if isinstance(q, dict) and q.get("question"):
+                    normalized = " ".join((q.get("question") or "").split()).strip()
+                    fup = (q.get("follow_up") or "").strip()
+                else:
+                    normalized = " ".join((q or "").split()).strip()
+                    fup = ""
                 if not normalized:
                     continue
                 if normalized not in questions and normalized not in generated:
                     generated.append(normalized)
+                    generated_followups.append(fup)
         except Exception:
             logger.exception("generate-more.agent.error: session=%s", session_id)
 
     # Fallback: if nothing generated, add a simple placeholder to avoid empty response
     if not generated:
         generated = [f"Tell me more about {len(questions) + i + 1}" for i in range(payload.num_questions)]
+        generated_followups = ["Can you share a concrete result?" for _ in generated]
 
     questions.extend(generated)
+    followups.extend(generated_followups)
     session["questions"] = questions
+    session["question_followups"] = followups
 
     perq = session.get("per_question") or []
     while len(perq) < len(questions):
@@ -660,7 +693,7 @@ async def generate_additional_questions(session_id: str, payload: GenerateMoreQu
     session["updated_at"] = datetime.utcnow().isoformat() + "Z"
 
     _persist_session_state(session_id, session)
-    return {"questions": questions, "added": generated}
+    return {"questions": questions, "follow_ups": followups, "added": generated}
 
 
 @app.post("/evaluate-answer", response_model=EvaluateAnswerResponse)
@@ -825,6 +858,11 @@ async def evaluate_answer(request: EvaluateAnswerRequest):
     session["current_question_index"] = len(session["answers"])
     # Update per_question as well (backward compatible)
     questions = session.get("questions") or []
+    # Ensure followups list is padded to match questions
+    q_followups = session.get("question_followups") or []
+    while len(q_followups) < len(questions):
+        q_followups.append("")
+    session["question_followups"] = q_followups
     idx = min(len(session["answers"]) - 1, max(0, len(questions) - 1)) if questions else len(session["answers"]) - 1
     perq = session.get("per_question") or [None] * len(questions)
     if len(perq) < len(questions):
@@ -893,6 +931,7 @@ async def get_session_status(session_id: str):
         "session_id": session_id,
         "name": session.get("name"),
         "questions": session["questions"],
+        "question_followups": session.get("question_followups", []),
         "answers": session["answers"],
         "evaluations": session["evaluations"],
         "current_question_index": session.get("current_question_index", 0),
