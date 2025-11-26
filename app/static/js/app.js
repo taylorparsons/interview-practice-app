@@ -3157,8 +3157,8 @@ function formatExampleAnswer(answer) {
         try {
             answer = JSON.parse(answer);
         } catch {
-            // If parsing fails, return the original string
-            return answer;
+            // If parsing fails, format the raw text into bolded key sentences
+            return formatPlainExampleAnswer(answer);
         }
     }
 
@@ -3198,6 +3198,26 @@ function formatExampleAnswer(answer) {
     }
 
     return formattedAnswer;
+}
+
+function formatPlainExampleAnswer(text) {
+    if (!text || typeof text !== 'string') return '';
+    const paragraphs = text.trim().split(/\n\s*\n/);
+    let out = '## Example Answer\n';
+    paragraphs.forEach((para) => {
+        const sentences = para.split(/(?<=[.!?])\s+/).filter(Boolean);
+        sentences.forEach((s, idx) => {
+            const sentence = s.trim();
+            if (!sentence) return;
+            if (idx === 0) {
+                out += `- **${sentence}**\n`;
+            } else {
+                out += `  ${sentence}\n`;
+            }
+        });
+        out += '\n';
+    });
+    return out.trim();
 }
 
 // Update example answer display to use markdown formatting
