@@ -49,6 +49,7 @@ function createInitialState() {
             verbosity: 'balanced',
             voice_id: 'verse',
         },
+        exampleCache: {},
         // When true, displayFeedback will be shown once after resume if available
         resumeShowFeedbackOnce: false,
         resumeText: '',
@@ -231,12 +232,8 @@ const feedbackNoiseTokens = new Set([
 ]);
 
 function setVoiceControls(active) {
-    if (startVoiceBtn) {
-        startVoiceBtn.classList.toggle('hidden', active);
-    }
-    if (stopVoiceBtn) {
-        stopVoiceBtn.classList.toggle('hidden', !active);
-    }
+    if (stopVoiceBtn) stopVoiceBtn.classList.toggle('hidden', !active);
+    updateVoiceStartButtonStyles(active);
 }
 
 // Toggle layout between typed/manual vs. live voice
@@ -245,7 +242,7 @@ function setVoiceLayout(isLive) {
     if (answerLabel) answerLabel.classList.toggle('hidden', isLive);
     if (answerInput) answerInput.classList.toggle('hidden', isLive);
     if (answerBtn) answerBtn.classList.toggle('hidden', isLive);
-    if (getExampleBtn) getExampleBtn.classList.toggle('hidden', isLive);
+    // Keep example button visible
     const micButtonEl = document.getElementById('mic-button');
     if (micButtonEl) {
         const container = micButtonEl.parentElement || micButtonEl;
@@ -271,6 +268,7 @@ function setVoiceEnabled(enabled) {
     startVoiceBtn.disabled = !enabled;
     startVoiceBtn.classList.toggle('opacity-50', !enabled);
     startVoiceBtn.classList.toggle('cursor-not-allowed', !enabled);
+    updateVoiceStartButtonStyles(false);
 }
 
 function updateVoiceStatus(message, tone = 'idle') {
@@ -280,6 +278,23 @@ function updateVoiceStatus(message, tone = 'idle') {
     const toneClass = voiceStatusClasses[tone] || voiceStatusClasses.idle;
     voiceStatus.className = `text-sm font-medium ${toneClass}`;
     voiceStatus.textContent = message;
+    updateVoiceStartButtonStyles(tone === 'live');
+}
+
+function updateVoiceStartButtonStyles(isLive) {
+    if (!startVoiceBtn) return;
+    startVoiceBtn.classList.remove('bg-green-600','hover:bg-green-700','focus:ring-green-500','bg-red-600','hover:bg-red-700','focus:ring-red-500');
+    if (startVoiceBtn.disabled) {
+        startVoiceBtn.classList.add('bg-green-600','hover:bg-green-700','focus:ring-green-500');
+        return;
+    }
+    if (isLive) {
+        startVoiceBtn.classList.add('bg-red-600','hover:bg-red-700','focus:ring-red-500');
+        startVoiceBtn.textContent = 'Voice Live';
+    } else {
+        startVoiceBtn.classList.add('bg-green-600','hover:bg-green-700','focus:ring-green-500');
+        startVoiceBtn.textContent = 'Start Voice Session';
+    }
 }
 
 function clearVoiceTranscript() {
@@ -2520,6 +2535,7 @@ async function syncSessionStateFromServer() {
     state.practice_history = data.practice_history || state.practice_history;
     state.voice_settings = data.voice_settings || state.voice_settings;
     state.questionFollowups = data.question_followups || [];
+    state.exampleCache = {};
     state.currentQuestionIndex = typeof data.current_question_index === 'number'
         ? data.current_question_index
         : state.currentQuestionIndex;
@@ -3318,10 +3334,15 @@ function displayCoachFeedback(raw) {
 
 // Handle getting example answer
 async function handleGetExample() {
+    const question = state.questions[state.currentQuestionIndex];
+    const cached = state.exampleCache && state.exampleCache[question];
+    if (cached) {
+        displayExampleAnswer(cached);
+        exampleSection.classList.remove('hidden');
+        exampleSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        return;
+    }
     try {
-        const question = state.questions[state.currentQuestionIndex];
-        
-        // Get example answer
         const response = await fetch('/generate-example-answer', {
             method: 'POST',
             headers: {
@@ -3338,6 +3359,8 @@ async function handleGetExample() {
         }
         
         const data = await response.json();
+        if (!state.exampleCache) state.exampleCache = {};
+        state.exampleCache[question] = data.answer;
         if (exampleQuestion) {
             exampleQuestion.textContent = `Question: ${question}`;
             exampleQuestion.classList.remove('hidden');
