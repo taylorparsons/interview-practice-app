@@ -46,6 +46,8 @@ def load_session(session_id: str) -> Optional[Dict[str, Any]]:
         data["practice_history"] = []
     if "pdf_exports" not in data or data["pdf_exports"] is None:
         data["pdf_exports"] = []
+    if "summary" not in data or data["summary"] is None:
+        data["summary"] = {}
     return data
 
 

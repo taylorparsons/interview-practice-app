@@ -112,3 +112,42 @@ def test_documents_endpoint_returns_texts():
     docs = r.json()
     assert docs.get("resume_text") == "R text"
     assert docs.get("job_desc_text") == "JD text"
+
+
+def test_settings_drawer_controls_present_and_wired():
+    html = _read_text(HTML_PATH)
+    assert 'id="global-settings"' in html
+    assert 'id="voice-settings-drawer"' in html
+    js = _read_text(JS_PATH)
+    # Guarded listener prevents ReferenceError when button is present/absent
+    assert "if (openSettingsBtn && voiceSettingsDrawer)" in js
+    assert "openSettingsBtn.addEventListener('click'" in js
+
+
+def test_sessions_modal_controls_present_and_wired():
+    html = _read_text(HTML_PATH)
+    assert 'id="sessions-modal"' in html
+    assert 'id="sessions-modal-select"' in html
+    assert 'id="sessions-rename"' in html
+    assert 'id="sessions-load"' in html
+    js = _read_text(JS_PATH)
+    assert "if (openSessionsBtn && sessionsModal)" in js
+    assert "openSessionsBtn.addEventListener('click'" in js
+    assert "sessionsRenameBtn.addEventListener('click'" in js
+    assert "sessionsLoadBtn.addEventListener('click'" in js
+
+
+def test_mark_for_review_button_and_handler_present():
+    html = _read_text(HTML_PATH)
+    assert 'id="mark-review"' in html
+    js = _read_text(JS_PATH)
+    assert "if (markReviewBtn)" in js
+    assert "markReviewBtn.addEventListener('click'" in js
+    assert "toggleMarkForReview" in js
+
+
+def test_export_transcript_button_guard_defined():
+    js = _read_text(JS_PATH)
+    # Prevent regressions where undeclared exportTranscriptBtn breaks DOMContentLoaded handler
+    assert "const exportTranscriptBtn" in js
+    assert "if (exportTranscriptBtn)" in js

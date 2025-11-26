@@ -27,10 +27,12 @@
 
     <div class="section">
       <h2>Questions & Responses</h2>
-      {% if summary_average_score %}
+      {% if (summary_average_score is not none) or (summary_strengths and summary_strengths|length > 0) or (summary_improvements and summary_improvements|length > 0) or summary_tone %}
       <div class="card">
         <div class="label">Summary</div>
+        {% if summary_average_score is not none %}
         <div><strong>Average score:</strong> {{ '%.1f'|format(summary_average_score) }}/10</div>
+        {% endif %}
         {% if summary_strengths and summary_strengths|length > 0 %}
         <div class="section">
           <div class="text-sm font-medium text-green-700 mb-1">Strengths</div>
@@ -45,6 +47,12 @@
           <ul>
             {% for w in summary_improvements %}<li>{{ w }}</li>{% endfor %}
           </ul>
+        </div>
+        {% endif %}
+        {% if summary_tone %}
+        <div class="section">
+          <div class="text-sm font-medium text-blue-700 mb-1">Tone & delivery</div>
+          {% if summary_tone_html %}<div>{{ summary_tone_html | safe }}</div>{% else %}<div>{{ summary_tone }}</div>{% endif %}
         </div>
         {% endif %}
       </div>

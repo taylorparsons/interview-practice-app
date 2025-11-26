@@ -12,6 +12,11 @@ An AI-powered interview practice application that helps job seekers prepare for 
 - Session autosave with one-click resume
 - Realtime Voice Interview Coach (OpenAI GPT Realtime + WebRTC)
 
+### Evaluation schema enforcement
+- Evaluation prompts embed an explicit JSON schema; server validates responses and falls back if invalid.
+- Invalid payloads log `evaluation.schema.invalid` at INFO, retry once, then use heuristic fallback.
+- Details and sequence diagrams: `docs/2025-11-26-evaluation-schema-enforcement.md`.
+
 ## Session Flow Overview
 ```
 +---------------------------+

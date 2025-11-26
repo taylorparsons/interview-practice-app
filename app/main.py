@@ -91,6 +91,8 @@ def _ensure_session_defaults(session: Dict[str, Any]) -> Dict[str, Any]:
         session["voice_agent_text"] = {}
     if "voice_messages" not in session or session["voice_messages"] is None:
         session["voice_messages"] = []
+    if "summary" not in session or session["summary"] is None:
+        session["summary"] = {}
     voice_settings = session.get("voice_settings")
     if not isinstance(voice_settings, dict):
         voice_settings = {}
@@ -189,6 +191,55 @@ def _derive_session_name(job_desc_text: str) -> str:
         return s or "item"
 
     return f"{slugify(title)}_{slugify(company)}"
+
+
+def _normalize_string_list(items: Optional[Any]) -> List[str]:
+    """Normalize a list-like value into a list of non-empty strings."""
+    if items is None:
+        return []
+    if isinstance(items, str):
+        items = [items]
+    result: List[str] = []
+    try:
+        for item in items:
+            if not isinstance(item, str):
+                continue
+            val = item.strip()
+            if val:
+                result.append(val)
+    except Exception:
+        return []
+    return result
+
+
+def _validate_evaluation_payload(raw: Any) -> Dict[str, Any]:
+    """Validate and normalize an evaluation payload returned by the model."""
+    if not isinstance(raw, dict):
+        raise InvalidEvaluationError("payload_not_dict")
+
+    try:
+        score = int(raw.get("score"))
+        if score < 1 or score > 10:
+            raise ValueError("score_range")
+    except Exception:
+        raise InvalidEvaluationError("score_invalid")
+
+    strengths = _normalize_string_list(raw.get("strengths"))
+    weaknesses = _normalize_string_list(raw.get("weaknesses"))
+    improvements = _normalize_string_list(raw.get("improvements"))
+    feedback = str(raw.get("feedback") or "").strip()
+    example_improvement = str(raw.get("example_improvement") or "").strip()
+    why_asked = str(raw.get("why_asked") or "").strip()
+
+    return {
+        "score": score,
+        "strengths": strengths,
+        "weaknesses": weaknesses,
+        "improvements": improvements,
+        "feedback": feedback,
+        "example_improvement": example_improvement,
+        "why_asked": why_asked,
+    }
 
 
 # Request and response models
@@ -354,6 +405,13 @@ class SaveAgentTextRequest(BaseModel):
     text: str
 
 
+class SaveSummaryRequest(BaseModel):
+    average_score: Optional[float] = None
+    strengths: Optional[List[str]] = None
+    improvements: Optional[List[str]] = None
+    tone: Optional[str] = None
+
+
 class VoiceMessagePayload(BaseModel):
     role: str
     text: str
@@ -364,6 +422,10 @@ class VoiceMessagePayload(BaseModel):
 
 class SetCoachLevelRequest(BaseModel):
     level: str
+
+
+class InvalidEvaluationError(Exception):
+    """Raised when a model-produced evaluation payload fails validation."""
 
 
 # Routes
@@ -452,6 +514,7 @@ async def upload_documents(
         },
         "practice_history": [],
         "pdf_exports": [],
+        "summary": {},
         # Store the UI-selectable coach level; default to level_1 (Help).
         "coach_level": "level_1",
     }
@@ -587,12 +650,13 @@ async def evaluate_answer(request: EvaluateAnswerRequest):
                 len(request.answer or ""),
                 bool(transcript_text and transcript_text.strip()),
             )
-            evaluation = await agent.evaluate_answer(
+            evaluation_raw = await agent.evaluate_answer(
                 request.question,
                 request.answer,
                 transcript_text,
                 level=session.get("coach_level") or "level_2",
             )
+            evaluation = _validate_evaluation_payload(evaluation_raw)
 
             if "answers" not in session:
                 session["answers"] = []
@@ -617,6 +681,14 @@ async def evaluate_answer(request: EvaluateAnswerRequest):
             _persist_session_state(session_id, session)
 
             return {"evaluation": evaluation}
+        except InvalidEvaluationError as exc:
+            logger.info(
+                "evaluation.schema.invalid: session=%s attempt=%s reason=%s",
+                session_id,
+                attempt + 1,
+                exc,
+            )
+            continue
         except Exception:
             logger.exception(
                 "evaluation.agent error: session=%s attempt=%s", session_id, attempt + 1
@@ -780,6 +852,7 @@ async def get_session_status(session_id: str):
         "voice_agent_text": session.get("voice_agent_text", {}),
         "voice_messages": session.get("voice_messages", []),
         "voice_settings": session.get("voice_settings", {}),
+        "summary": session.get("summary", {}),
         # Expose the current coach level to hydrate the UI selector.
         "coach_level": session.get("coach_level", "level_1"),
     }
@@ -817,6 +890,32 @@ async def save_voice_agent_text(session_id: str, payload: SaveAgentTextRequest):
     session["voice_agent_text"] = vat
     _persist_session_state(session_id, session)
     return {"ok": True}
+
+
+@app.post("/session/{session_id}/summary")
+async def save_summary(session_id: str, payload: SaveSummaryRequest):
+    """Persist the client-computed summary (strengths, improvements, tone)."""
+    session = _get_session(session_id)
+
+    def _normalize_items(items: Optional[List[str]]) -> List[str]:
+        normalized: List[str] = []
+        for item in items or []:
+            if not isinstance(item, str):
+                continue
+            trimmed = item.strip()
+            if trimmed:
+                normalized.append(trimmed)
+        return normalized
+
+    summary_payload = {
+        "average_score": payload.average_score,
+        "strengths": _normalize_items(payload.strengths),
+        "improvements": _normalize_items(payload.improvements),
+        "tone": (payload.tone or "").strip(),
+    }
+    session["summary"] = summary_payload
+    _persist_session_state(session_id, session)
+    return {"ok": True, "summary": summary_payload}
 
 
 @app.post("/session/{session_id}/voice-messages")
@@ -1233,9 +1332,39 @@ async def export_pdf(session_id: str, background_tasks: BackgroundTasks, request
                         improvements_agg.add(w_clean)
         evals_rendered.append(entry)
     context["evaluations"] = evals_rendered
-    context["summary_strengths"] = sorted(strengths_agg)
-    context["summary_improvements"] = sorted(improvements_agg)
-    context["summary_average_score"] = (total_score / score_count) if score_count else None
+    computed_strengths = sorted(strengths_agg)
+    computed_improvements = sorted(improvements_agg)
+    computed_average = (total_score / score_count) if score_count else None
+
+    summary_payload = session.get("summary") or {}
+
+    def _clean_list(items: Optional[List[str]]) -> List[str]:
+        cleaned: List[str] = []
+        for item in items or []:
+            if not isinstance(item, str):
+                continue
+            text = item.strip()
+            if text:
+                cleaned.append(text)
+        return cleaned
+
+    summary_strengths = _clean_list(summary_payload.get("strengths"))
+    summary_improvements = _clean_list(summary_payload.get("improvements"))
+    summary_average_score = summary_payload.get("average_score")
+    tone_text = (summary_payload.get("tone") or "").strip()
+
+    if not summary_strengths:
+        summary_strengths = computed_strengths
+    if not summary_improvements:
+        summary_improvements = computed_improvements
+    if summary_average_score is None:
+        summary_average_score = computed_average
+
+    context["summary_strengths"] = summary_strengths
+    context["summary_improvements"] = summary_improvements
+    context["summary_average_score"] = summary_average_score
+    context["summary_tone"] = tone_text
+    context["summary_tone_html"] = render_markdown_safe(tone_text) if tone_text else ""
 
     html = template.render(**context)
     try:

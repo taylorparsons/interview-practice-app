@@ -10,6 +10,22 @@ from app.models.prompts import build_dual_level_prompt
 
 logger = logging.getLogger(__name__)
 
+# Explicit JSON schema shared with prompts to constrain model responses
+EVALUATION_JSON_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "score": {"type": "integer", "minimum": 1, "maximum": 10},
+        "strengths": {"type": "array", "items": {"type": "string"}},
+        "weaknesses": {"type": "array", "items": {"type": "string"}},
+        "improvements": {"type": "array", "items": {"type": "string"}},
+        "feedback": {"type": "string"},
+        "example_improvement": {"type": "string"},
+        "why_asked": {"type": "string"},
+    },
+    "required": ["score", "strengths", "weaknesses", "feedback", "example_improvement", "why_asked"],
+    "additionalProperties": False,
+}
+
 
 def get_base_coach_prompt() -> str:
     """Base system-level prompt used to define the interview coach persona.
@@ -177,6 +193,7 @@ class InterviewPracticeAgent:
         vt = (voice_transcript or "").strip()
         vt_block = f"\n\nVoice Transcript (if any):\n{vt}\n" if vt else ""
 
+        schema_block = json.dumps(EVALUATION_JSON_SCHEMA, indent=2)
         user_prompt = f"""
 Evaluate the interview answer using this rubric (integer score 1-10 only):
 - 9-10: Excellent STAR+I, crisp actions, quantified impact, tailored to role.
@@ -186,14 +203,7 @@ Evaluate the interview answer using this rubric (integer score 1-10 only):
 - 1-2: Very poor/irrelevant.
 
 Return ONLY JSON in this shape:
-{{
-  "score": <integer 1-10>,
-  "strengths": ["..."],
-  "weaknesses": ["..."],
-  "feedback": "...",            # concise coaching notes
-  "example_improvement": "...", # tone/delivery tips
-  "why_asked": "..."            # why this question matters
-}}
+{schema_block}
 
 Interview Question: {question}
 

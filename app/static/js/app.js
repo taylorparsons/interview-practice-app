@@ -105,6 +105,7 @@ const nextQuestionBtn = document.getElementById('next-question');
 const backToInterviewBtn = document.getElementById('back-to-interview');
 const restartInterviewBtn = document.getElementById('restart-interview');
 const exportPdfBtn = document.getElementById('export-pdf');
+const exportTranscriptBtn = document.getElementById('export-transcript');
 
 const scoreValue = document.getElementById('score-value');
 const scoreBar = document.getElementById('score-bar');
@@ -3354,14 +3355,41 @@ function displaySummary() {
         }
     });
     
+    const strengthsList = Array.from(strengths);
+    const improvementsList = Array.from(improvements);
+
+    // Gather a short tone/delivery summary from the evaluations
+    const toneNotes = [];
+    state.evaluations.forEach(ev => {
+        const toneText = ev.example_improvement || ev.why_asked || '';
+        if (toneText && !isNoiseFeedback(toneText)) {
+            toneNotes.push(stripMarkdownish(toneText));
+        }
+    });
+    const toneSummary = toneNotes.length ? toneNotes[0] : '';
+
+    // Persist summary payload so the PDF matches the UI view
+    if (state.sessionId) {
+        fetch(`/session/${state.sessionId}/summary`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                average_score: evaluationCount > 0 ? avgScore : null,
+                strengths: strengthsList,
+                improvements: improvementsList,
+                tone: toneSummary,
+            }),
+        }).catch(() => {});
+    }
+
     // Add to lists
-    strengths.forEach(strength => {
+    strengthsList.forEach(strength => {
         const li = document.createElement('li');
         li.textContent = strength;
         overallStrengths.appendChild(li);
     });
     
-    improvements.forEach(improvement => {
+    improvementsList.forEach(improvement => {
         const li = document.createElement('li');
         li.textContent = improvement;
         overallImprovements.appendChild(li);
