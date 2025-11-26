@@ -22,6 +22,8 @@ def test_get_voices_catalog(client):
     data = res.json()
     assert isinstance(data, list)
     assert all('id' in v and 'label' in v for v in data)
+    ids = {v.get("id") for v in data}
+    assert "gpt-realtime" in ids
 
 
 def _fake_async_client_factory(captured: dict):
