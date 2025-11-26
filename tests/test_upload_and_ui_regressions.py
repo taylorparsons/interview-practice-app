@@ -146,6 +146,17 @@ def test_mark_for_review_button_and_handler_present():
     assert "toggleMarkForReview" in js
 
 
+def test_question_management_controls_present():
+    html = _read_text(HTML_PATH)
+    assert 'id="generate-more-count"' in html
+    assert 'id="generate-more-btn"' in html
+    assert 'id="remove-question-select"' in html
+    assert 'id="remove-questions-btn"' in html
+    js = _read_text(JS_PATH)
+    assert "handleGenerateMoreQuestions" in js
+    assert "handleRemoveQuestions" in js
+
+
 def test_export_transcript_button_guard_defined():
     js = _read_text(JS_PATH)
     # Prevent regressions where undeclared exportTranscriptBtn breaks DOMContentLoaded handler

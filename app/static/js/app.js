@@ -98,6 +98,11 @@ const customQuestionInput = document.getElementById('custom-question-input');
 const addCustomQuestionBtn = document.getElementById('add-custom-question');
 const clearCustomQuestionBtn = document.getElementById('clear-custom-question');
 const customQuestionStatus = document.getElementById('custom-question-status');
+const generateMoreCount = document.getElementById('generate-more-count');
+const generateMoreHint = document.getElementById('generate-more-hint');
+const generateMoreBtn = document.getElementById('generate-more-btn');
+const removeQuestionSelect = document.getElementById('remove-question-select');
+const removeQuestionsBtn = document.getElementById('remove-questions-btn');
 const answerInput = document.getElementById('answer');
 const answerBtn = document.getElementById('submit-answer');
 const getExampleBtn = document.getElementById('get-example');
@@ -1745,6 +1750,8 @@ function stopBrowserAsr() {
     if (prevQuestionBtn) prevQuestionBtn.addEventListener('click', () => { if (state.currentQuestionIndex > 0) displayQuestion(state.currentQuestionIndex - 1); });
     if (nextQuestionFooterBtn) nextQuestionFooterBtn.addEventListener('click', handleNextQuestion);
     if (markReviewBtn) markReviewBtn.addEventListener('click', toggleMarkForReview);
+    if (generateMoreBtn) generateMoreBtn.addEventListener('click', handleGenerateMoreQuestions);
+    if (removeQuestionsBtn) removeQuestionsBtn.addEventListener('click', handleRemoveQuestions);
     if (openVoiceSettingsBtn && voiceSettingsDrawer) {
         openVoiceSettingsBtn.addEventListener('click', async () => {
             await populateVoiceSettingsDrawer();
@@ -2449,6 +2456,7 @@ async function resumeSavedSession(sessionIdOverride = null) {
         setVoiceEnabled(hasQuestions);
         updateVoiceStatus(hasQuestions ? 'Ready for voice coaching' : 'Offline', 'idle');
         syncSettingsUI();
+        updateRemoveQuestionsList();
 
         if (!hasQuestions) {
             if (interviewContainer) {
@@ -2492,6 +2500,25 @@ async function resumeSavedSessionById(sessionId) {
         return;
     }
     await resumeSavedSession(sessionId);
+}
+
+async function syncSessionStateFromServer() {
+    if (!state.sessionId) throw new Error('No active session');
+    const res = await fetch(`/session/${state.sessionId}`);
+    if (!res.ok) throw new Error('Failed to refresh session state');
+    const data = await res.json();
+    state.questions = data.questions || [];
+    state.answers = data.answers || [];
+    state.evaluations = data.evaluations || [];
+    state.practice_history = data.practice_history || state.practice_history;
+    state.voice_settings = data.voice_settings || state.voice_settings;
+    state.currentQuestionIndex = typeof data.current_question_index === 'number'
+        ? data.current_question_index
+        : state.currentQuestionIndex;
+    state.voice = state.voice || createInitialVoiceState();
+    state.voice.transcriptsByIndex = data.voice_transcripts || {};
+    hydrateVoiceMessagesFromSession(data);
+    syncVoiceSettingsSummary();
 }
 
 function gatherSettingsFromUI(primary = true) {
@@ -3273,6 +3300,82 @@ async function handleGetExample() {
     }
 }
 
+async function handleGenerateMoreQuestions() {
+    if (!state.sessionId) return alert('Start or resume a session first.');
+    const btn = generateMoreBtn;
+    const count = Math.max(1, parseInt((generateMoreCount && generateMoreCount.value) || '1', 10) || 1);
+    const hint = (generateMoreHint && generateMoreHint.value || '').trim();
+    const payload = { num_questions: count, prompt_hint: hint || null };
+    const originalText = btn ? btn.textContent : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Generating…';
+    }
+    try {
+        const res = await fetch(`/session/${state.sessionId}/questions/generate-more`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+            const t = await res.text();
+            throw new Error(t || 'Failed to generate additional questions');
+        }
+        await syncSessionStateFromServer();
+        buildQuestionRail();
+        if (state.questions.length) {
+            displayQuestion(Math.min(state.currentQuestionIndex, state.questions.length - 1));
+        }
+    } catch (err) {
+        console.error('Generate more failed:', err);
+        alert(err && err.message ? err.message : 'Unable to generate more questions.');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = originalText || 'Generate & append';
+        }
+    }
+}
+
+async function handleRemoveQuestions() {
+    if (!state.sessionId) return alert('Start or resume a session first.');
+    if (!removeQuestionSelect) return;
+    const indices = Array.from(removeQuestionSelect.selectedOptions || []).map(opt => parseInt(opt.value, 10)).filter(Number.isInteger);
+    if (!indices.length) return alert('Select one or more questions to remove.');
+    const btn = removeQuestionsBtn;
+    const original = btn ? btn.textContent : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Removing…';
+    }
+    try {
+        const res = await fetch(`/session/${state.sessionId}/questions`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ indices }),
+        });
+        if (!res.ok) {
+            const t = await res.text();
+            throw new Error(t || 'Failed to remove questions');
+        }
+        await syncSessionStateFromServer();
+        buildQuestionRail();
+        if (state.questions.length) {
+            displayQuestion(Math.min(state.currentQuestionIndex, state.questions.length - 1));
+        } else if (currentQuestion) {
+            currentQuestion.textContent = 'No questions available. Generate or add a new one to continue.';
+        }
+    } catch (err) {
+        console.error('Remove questions failed:', err);
+        alert(err && err.message ? err.message : 'Unable to remove selected questions.');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = original || 'Remove selected';
+        }
+    }
+}
+
 // Handle moving to next question
 function handleNextQuestion() {
     // Move to next question or summary
@@ -3652,6 +3755,18 @@ function buildQuestionRail() {
     };
     renderInto(host);
     renderInto(hostDrawer);
+    updateRemoveQuestionsList();
+}
+
+function updateRemoveQuestionsList() {
+    if (!removeQuestionSelect) return;
+    removeQuestionSelect.innerHTML = '';
+    (state.questions || []).forEach((q, idx) => {
+        const opt = document.createElement('option');
+        opt.value = String(idx);
+        opt.textContent = `Q${idx + 1}: ${q}`;
+        removeQuestionSelect.appendChild(opt);
+    });
 }
 
 function toggleMarkForReview() {

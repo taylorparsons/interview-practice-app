@@ -107,16 +107,19 @@ class InterviewPracticeAgent:
         log_prefix = f"session={session_id} " if session_id else ""
         logger.info("%sInitialized Interview Agent with OpenAI model: %s", log_prefix, openai_model)
     
-    async def generate_interview_questions(self, num_questions: int = 5) -> List[str]:
+    async def generate_interview_questions(self, num_questions: int = 5, prompt_hint: Optional[str] = None) -> List[str]:
         """Generate interview questions based on resume and job description."""
         system_prompt = get_base_coach_prompt()
         
+        hint_block = f"\nFocus on: {prompt_hint}\n" if prompt_hint else ""
         user_prompt = f"""
         Resume:
         {self.resume_text}
         
         Job Description:
         {self.job_description_text}
+
+        {hint_block}
         
         Generate {num_questions} interview questions for this candidate based on their resume and the job description.
         Return the response as a JSON array of question strings.

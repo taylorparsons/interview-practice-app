@@ -150,3 +150,5 @@
 - TODO (post-release): tighten evaluation prompt + JSON schema (Pydantic/JSON schema enforcement) to reduce non-JSON `evaluate_answer` warnings and ensure compliant responses. Validate with a dedicated test that retries are minimal and fallbacks log at INFO or lower.
 - DONE 2025-11-26: Persist UI summary payloads (overall strengths/improvements/tone) server-side and include them in PDF export so server PDF matches client summary view.
 - DONE 2025-11-26: Evaluation prompt now embeds explicit JSON schema; invalid payloads log at INFO, retry once, then fallback with heuristic response. See docs/2025-11-26-evaluation-schema-enforcement.md.
+- TODO (upcoming): Pre-session settings panel to choose model/effort/verbosity and voice (add `gpt-realtime` option) before generating questions or starting voice; persist via settings/voice PATCH and reset agent so defaults apply on first use.
+- TODO (upcoming): Allow generating N additional questions mid-run (UI control + backend append) and allow removing one or more questions (including answered), warning that answers/evaluations/transcripts for removed items are dropped and indices shift.

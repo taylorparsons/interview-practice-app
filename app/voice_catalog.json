@@ -48,5 +48,10 @@
     "id": "verse",
     "label": "Verse",
     "preview_url": "/voices/preview/verse"
+  },
+  {
+    "id": "gpt-realtime",
+    "label": "GPT Realtime",
+    "preview_url": "/voices/preview/gpt-realtime"
   }
 ]

@@ -289,6 +289,11 @@ class AddQuestionRequest(BaseModel):
     make_active: Optional[bool] = True
 
 
+class GenerateMoreQuestionsRequest(BaseModel):
+    num_questions: int = 3
+    prompt_hint: Optional[str] = None
+
+
 class AddQuestionResponse(BaseModel):
     question: str
     index: int
@@ -298,6 +303,10 @@ class AddQuestionResponse(BaseModel):
 
 class PracticeAgainRequest(BaseModel):
     add_questions: Optional[List[str]] = None
+
+
+class DeleteQuestionsRequest(BaseModel):
+    indices: List[int]
 
 
 
@@ -614,6 +623,48 @@ async def add_custom_question(session_id: str, payload: AddQuestionRequest):
     }
 
 
+@app.post("/session/{session_id}/questions/generate-more")
+async def generate_additional_questions(session_id: str, payload: GenerateMoreQuestionsRequest):
+    """Generate and append additional interview questions mid-session."""
+    session = _get_session(session_id)
+    questions: List[str] = session.get("questions") or []
+
+    # Try to use the agent if available; otherwise, attempt to start it
+    generated: List[str] = []
+    session = await _ensure_agent_ready(session_id, session)
+    agent = session.get("agent")
+    if agent is not None:
+        try:
+            raw_new = await agent.generate_interview_questions(
+                payload.num_questions,
+                prompt_hint=payload.prompt_hint,
+            )
+            for q in raw_new or []:
+                normalized = " ".join((q or "").split()).strip()
+                if not normalized:
+                    continue
+                if normalized not in questions and normalized not in generated:
+                    generated.append(normalized)
+        except Exception:
+            logger.exception("generate-more.agent.error: session=%s", session_id)
+
+    # Fallback: if nothing generated, add a simple placeholder to avoid empty response
+    if not generated:
+        generated = [f"Tell me more about {len(questions) + i + 1}" for i in range(payload.num_questions)]
+
+    questions.extend(generated)
+    session["questions"] = questions
+
+    perq = session.get("per_question") or []
+    while len(perq) < len(questions):
+        perq.append(None)
+    session["per_question"] = perq
+    session["updated_at"] = datetime.utcnow().isoformat() + "Z"
+
+    _persist_session_state(session_id, session)
+    return {"questions": questions, "added": generated}
+
+
 @app.post("/evaluate-answer", response_model=EvaluateAnswerResponse)
 async def evaluate_answer(request: EvaluateAnswerRequest):
     session_id = request.session_id
@@ -916,6 +967,105 @@ async def save_summary(session_id: str, payload: SaveSummaryRequest):
     session["summary"] = summary_payload
     _persist_session_state(session_id, session)
     return {"ok": True, "summary": summary_payload}
+
+
+@app.delete("/session/{session_id}/questions")
+async def delete_questions(session_id: str, payload: DeleteQuestionsRequest):
+    """Delete one or more questions and reindex associated state."""
+    session = _get_session(session_id)
+    questions: List[str] = session.get("questions") or []
+    if not payload.indices:
+        raise HTTPException(status_code=400, detail="indices required")
+    remove_set = sorted({i for i in payload.indices if isinstance(i, int) and i >= 0})
+    if any(i >= len(questions) for i in remove_set):
+        raise HTTPException(status_code=400, detail="index out of range")
+    if not remove_set:
+        raise HTTPException(status_code=400, detail="no valid indices")
+
+    removed_questions = {questions[i] for i in remove_set}
+    def _shift_index(idx: int) -> Optional[int]:
+        if idx in remove_set:
+            return None
+        shift = sum(1 for r in remove_set if r < idx)
+        return idx - shift
+
+    # Rebuild questions
+    new_questions = [q for i, q in enumerate(questions) if i not in remove_set]
+    session["questions"] = new_questions
+
+    # Answers/evaluations filtered by question text
+    answers = session.get("answers") or []
+    session["answers"] = [a for a in answers if a.get("question") not in removed_questions]
+    evaluations = session.get("evaluations") or []
+    session["evaluations"] = [e for e, q in zip(evaluations, questions) if q not in removed_questions]
+
+    # per_question reindexed by position
+    perq = session.get("per_question") or []
+    new_perq = []
+    for i, entry in enumerate(perq):
+        if i in remove_set:
+            continue
+        new_perq.append(entry)
+    session["per_question"] = new_perq
+
+    # Transcripts and coach text reindexed
+    vt = session.get("voice_transcripts") or {}
+    new_vt = {}
+    for k, v in vt.items():
+        try:
+            idx = int(k)
+        except Exception:
+            continue
+        new_idx = _shift_index(idx)
+        if new_idx is None:
+            continue
+        new_vt[str(new_idx)] = v
+    session["voice_transcripts"] = new_vt
+
+    vat = session.get("voice_agent_text") or {}
+    new_vat = {}
+    for k, v in vat.items():
+        try:
+            idx = int(k)
+        except Exception:
+            continue
+        new_idx = _shift_index(idx)
+        if new_idx is None:
+            continue
+        new_vat[str(new_idx)] = v
+    session["voice_agent_text"] = new_vat
+
+    # Voice messages reindexed/dropped
+    msgs = session.get("voice_messages") or []
+    new_msgs = []
+    for m in msgs:
+        q_idx = m.get("question_index")
+        if q_idx is None:
+            new_msgs.append(m)
+            continue
+        try:
+            q_int = int(q_idx)
+        except Exception:
+            continue
+        new_idx = _shift_index(q_int)
+        if new_idx is None:
+            continue
+        nm = dict(m)
+        nm["question_index"] = new_idx
+        new_msgs.append(nm)
+    session["voice_messages"] = new_msgs
+
+    # Clamp current question index
+    cqi = session.get("current_question_index", 0) or 0
+    cqi = min(cqi, max(0, len(new_questions) - 1)) if new_questions else 0
+    session["current_question_index"] = cqi
+    session["updated_at"] = datetime.utcnow().isoformat() + "Z"
+
+    _persist_session_state(session_id, session)
+    return {
+        "questions": new_questions,
+        "current_question_index": cqi,
+    }
 
 
 @app.post("/session/{session_id}/voice-messages")
