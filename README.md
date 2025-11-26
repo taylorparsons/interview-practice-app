@@ -12,6 +12,9 @@ An AI-powered interview practice application that helps job seekers prepare for 
 - Session autosave with one-click resume
 - Realtime Voice Interview Coach (OpenAI GPT Realtime + WebRTC)
 
+### Question management
+- Add custom questions, generate additional model questions mid-session (with optional hint), and remove selected questions (answers/feedback/transcripts for removed items are dropped; later questions are re-indexed).
+
 ### Evaluation schema enforcement
 - Evaluation prompts embed an explicit JSON schema; server validates responses and falls back if invalid.
 - Invalid payloads log `evaluation.schema.invalid` at INFO, retry once, then use heuristic fallback.
@@ -144,6 +147,7 @@ Notes
   - `GET /voices` — returns the catalog of voices
   - `PATCH /session/{session_id}/voice` — sets the session’s selected voice
   - `GET /voices/preview/{voice_id}` — returns a cached/synthesized MP3 sample
+- Catalog includes `gpt-realtime` alongside existing voices.
 - Tip: Pre‑generate all previews for faster UX during development:
   - `scripts/codex_up.sh --preseed-previews`
 
