@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Optional, List
 from datetime import datetime
-from app.config import OPENAI_REALTIME_VOICE, OPENAI_MODEL
+from app.config import OPENAI_REALTIME_VOICE, OPENAI_REALTIME_MODEL, OPENAI_MODEL
 
 SESSION_DIR = Path(__file__).resolve().parent.parent / "session_store"
 
@@ -39,6 +39,7 @@ def load_session(session_id: str) -> Optional[Dict[str, Any]]:
         voice_settings = {}
     voice_settings.setdefault("voice_id", OPENAI_REALTIME_VOICE)
     voice_settings.setdefault("model_id", OPENAI_MODEL)
+    voice_settings.setdefault("realtime_model", OPENAI_REALTIME_MODEL)
     voice_settings.setdefault("thinking_effort", "medium")
     voice_settings.setdefault("verbosity", "balanced")
     data["voice_settings"] = voice_settings

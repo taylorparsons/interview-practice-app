@@ -100,6 +100,8 @@ def _ensure_session_defaults(session: Dict[str, Any]) -> Dict[str, Any]:
         voice_settings["voice_id"] = OPENAI_REALTIME_VOICE
     if not voice_settings.get("model_id"):
         voice_settings["model_id"] = OPENAI_MODEL
+    if not voice_settings.get("realtime_model"):
+        voice_settings["realtime_model"] = OPENAI_REALTIME_MODEL
     if not voice_settings.get("thinking_effort"):
         voice_settings["thinking_effort"] = "medium"
     if not voice_settings.get("verbosity"):
@@ -282,6 +284,7 @@ class SessionSettingsRequest(BaseModel):
     model_id: Optional[str] = None
     thinking_effort: Optional[str] = None
     verbosity: Optional[str] = None
+    realtime_model: Optional[str] = None
 
 
 class AddQuestionRequest(BaseModel):
@@ -376,12 +379,6 @@ class VoiceDescriptor(BaseModel):
 
 class PracticeAgainRequest(BaseModel):
     add_questions: Optional[List[str]] = None
-
-
-class SessionSettingsRequest(BaseModel):
-    model_id: Optional[str] = None
-    thinking_effort: Optional[str] = None
-    verbosity: Optional[str] = None
 
 
 class PDFExportResponse(BaseModel):
@@ -518,6 +515,7 @@ async def upload_documents(
         "voice_settings": {
             "voice_id": OPENAI_REALTIME_VOICE,
             "model_id": OPENAI_MODEL,
+            "realtime_model": OPENAI_REALTIME_MODEL,
             "thinking_effort": "medium",
             "verbosity": "balanced",
         },
@@ -1265,6 +1263,7 @@ async def update_session_settings(session_id: str, payload: SessionSettingsReque
     allowed_models = {"gpt-4o-mini", "gpt-5-mini", "gpt-5"}
     allowed_effort = {"medium", "high"}
     allowed_verbosity = {"low", "medium", "balanced", "high"}
+    allowed_realtime_models = {OPENAI_REALTIME_MODEL, "gpt-realtime"}
 
     vs = session.get("voice_settings") or {}
 
@@ -1284,6 +1283,12 @@ async def update_session_settings(session_id: str, payload: SessionSettingsReque
         if verb not in allowed_verbosity:
             raise HTTPException(status_code=400, detail="Invalid verbosity")
         vs["verbosity"] = verb
+
+    if payload.realtime_model:
+        rm = (payload.realtime_model or "").strip()
+        if rm not in allowed_realtime_models:
+            raise HTTPException(status_code=400, detail="Invalid realtime_model")
+        vs["realtime_model"] = rm
 
     session["voice_settings"] = vs
     session["agent"] = None  # force re-init on next use to pick up model change
@@ -1314,11 +1319,13 @@ async def create_voice_session(request: VoiceSessionRequest):
         selected_voice = (session.get("voice_settings") or {}).get("voice_id")
     except Exception:
         selected_voice = None
+    voice_settings = session.get("voice_settings") or {}
     voice_name = selected_voice or request.voice or OPENAI_REALTIME_VOICE
+    realtime_model = voice_settings.get("realtime_model") or OPENAI_REALTIME_MODEL
     instructions = _build_voice_instructions(request.session_id, session)
 
     payload: Dict[str, Any] = {
-        "model": OPENAI_REALTIME_MODEL,
+        "model": realtime_model,
         "modalities": ["audio", "text"],
         "voice": voice_name,
         "instructions": instructions,

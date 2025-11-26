@@ -142,6 +142,7 @@ Notes
 
 ### Voice Selection & Preview
 - Use the **Voice** dropdown to choose a coach voice and click **Save** to persist it for the session.
+- Use the **Voice model** dropdown to choose the realtime model (default `gpt-realtime-mini-2025-10-06`, optional `gpt-realtime`) before starting a voice session.
 - Click **Preview** to play an MP3 sample of the selected voice. The first request synthesizes the sample with OpenAI TTS and caches it under `app/static/voices/<id>-preview.mp3`; subsequent previews stream from cache.
 - Endpoints involved:
   - `GET /voices` — returns the catalog of voices

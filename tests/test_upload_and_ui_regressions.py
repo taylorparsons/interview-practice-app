@@ -157,6 +157,15 @@ def test_question_management_controls_present():
     assert "handleRemoveQuestions" in js
 
 
+def test_voice_model_selects_present():
+    html = _read_text(HTML_PATH)
+    assert 'id="realtime-model-select"' in html
+    assert 'id="realtime-model-select-2"' in html
+    js = _read_text(JS_PATH)
+    assert "realtimeModelSelect" in js
+    assert "realtime_model" in js
+
+
 def test_export_transcript_button_guard_defined():
     js = _read_text(JS_PATH)
     # Prevent regressions where undeclared exportTranscriptBtn breaks DOMContentLoaded handler

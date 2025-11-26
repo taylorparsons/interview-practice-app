@@ -44,6 +44,7 @@ function createInitialState() {
         practice_history: [],
         voice_settings: {
             model_id: 'gpt-4o-mini',
+            realtime_model: 'gpt-realtime-mini-2025-10-06',
             thinking_effort: 'medium',
             verbosity: 'balanced',
             voice_id: 'verse',
@@ -154,6 +155,7 @@ const voiceSaveBtn = document.getElementById('voice-save');
 const voicePreviewAudio = document.getElementById('voice-preview-audio');
 const settingsSaveBtn = document.getElementById('settings-save');
 const modelSelect = document.getElementById('model-select');
+const realtimeModelSelect = document.getElementById('realtime-model-select');
 const effortSelect = document.getElementById('effort-select');
 const verbositySelect = document.getElementById('verbosity-select');
 // Coaching level controls
@@ -197,6 +199,7 @@ const voicePreviewAudio2 = document.getElementById('voice-preview-audio-2');
 const voiceSelect2Status = document.getElementById('voice-select-2-status');
 const voiceSelect2Retry = document.getElementById('voice-select-2-retry');
 const modelSelect2 = document.getElementById('model-select-2');
+const realtimeModelSelect2 = document.getElementById('realtime-model-select-2');
 const effortSelect2 = document.getElementById('effort-select-2');
 const verbositySelect2 = document.getElementById('verbosity-select-2');
 const settingsSaveBtn2 = document.getElementById('settings-save-2');
@@ -2069,12 +2072,15 @@ function syncVoiceSettingsSummary() {
 function syncSettingsUI() {
     const vs = state && state.voice_settings ? state.voice_settings : {};
     const modelId = vs.model_id || 'gpt-4o-mini';
+    const realtimeModel = vs.realtime_model || 'gpt-realtime-mini-2025-10-06';
     const effort = vs.thinking_effort || 'medium';
     const verbosity = vs.verbosity || 'balanced';
     if (modelSelect) modelSelect.value = modelId;
+    if (realtimeModelSelect) realtimeModelSelect.value = realtimeModel;
     if (effortSelect) effortSelect.value = effort;
     if (verbositySelect) verbositySelect.value = verbosity;
     if (modelSelect2) modelSelect2.value = modelId;
+    if (realtimeModelSelect2) realtimeModelSelect2.value = realtimeModel;
     if (effortSelect2) effortSelect2.value = effort;
     if (verbositySelect2) verbositySelect2.value = verbosity;
 }
@@ -2523,10 +2529,12 @@ async function syncSessionStateFromServer() {
 
 function gatherSettingsFromUI(primary = true) {
     const ms = primary ? modelSelect : modelSelect2;
+    const rms = primary ? realtimeModelSelect : realtimeModelSelect2;
     const es = primary ? effortSelect : effortSelect2;
     const vs = primary ? verbositySelect : verbositySelect2;
     return {
         model_id: (ms && ms.value) || 'gpt-4o-mini',
+        realtime_model: (rms && rms.value) || 'gpt-realtime-mini-2025-10-06',
         thinking_effort: (es && es.value) || 'medium',
         verbosity: (vs && vs.value) || 'balanced',
     };
