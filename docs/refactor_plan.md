@@ -1,65 +1,118 @@
-# Refactor Plan for `app/main.py`
+# Refactor Plan for Multi-Agent General Chat Expansion
 
-## Current pain points
-- `app/main.py` mixes HTTP routing, session persistence, AI agent orchestration, realtime voice plumbing, and fallback heuristics inside a single 1,100+ line module, making it hard to reason about or extend.【F:app/main.py†L1-L336】【F:app/main.py†L337-L676】【F:app/main.py†L677-L1023】【F:app/main.py†L1024-L1131】
-- Domain concepts (session metadata, voice messaging, evaluation summaries) are implicit dictionaries that are mutated from multiple endpoints, which invites inconsistent shapes and brittle tests.【F:app/main.py†L74-L164】【F:app/main.py†L336-L571】【F:app/main.py†L572-L856】
-- OpenAI realtime/voice configuration is hard-coded inside the route, preventing reuse for the upcoming general chat experience and any “team of agents” orchestration with new parameters.【F:app/main.py†L856-L1023】
+This document captures the refactor strategy needed to evolve the current interview-practice application into a compartmentalized platform that can host multiple **agent teams** (e.g., the existing interview coach plus a new general chat team for Veneo Inc.) with configurable parameters.
 
-## Target architecture
-1. **API routers**
-   - Introduce `app/api/__init__.py` and split FastAPI routes into dedicated routers: `sessions.py`, `questions.py`, `evaluations.py`, and `voice.py`. Each router imports thin service functions instead of touching globals directly.
-   - Mount routers from a slim `app/main.py` (now mostly FastAPI initialization and middleware wiring).
+## 1. Context and goals
 
-2. **Service layer**
-   - Create `app/services/session_service.py` encapsulating `_get_session`, `_persist_session_state`, and CRUD helpers. Use dataclasses or Pydantic models for strongly typed session structures to make mutation explicit.
-   - Move question generation, evaluation, and example-answer fallbacks into `app/services/qa_service.py`, parameterized to accept an injected `InterviewPracticeAgent` (or a more general `AgentTeam` factory for future multi-agent support).
-   - Extract voice-specific helpers (`_build_voice_instructions`, catalog helpers, preview synthesis) into `app/services/voice_service.py` with a `VoiceConfig` settings object so different features can reuse the same plumbing.
-   - Encapsulate OpenAI realtime session bootstrapping into `app/services/realtime_client.py`, allowing dependency injection of API clients and customizable parameters for new agent teams or general chat.
+* `app/main.py` currently centralizes HTTP routing, session state management, agent orchestration, and voice/realtime plumbing in a single file of more than 1,100 lines.【F:app/main.py†L1-L1131】
+* Domain objects (session metadata, transcripts, evaluation summaries) are shaped as loosely typed dictionaries shared across endpoints, making it difficult to safely add new personas or parameter sets.【F:app/main.py†L74-L1023】
+* The new requirement—introducing another team of agents that supports a distinct parameter bundle for Veneo's general chat—requires clearer seams for routing, state, configuration, and agent instantiation so that features can coexist without interference.
 
-3. **Agent orchestration**
-   - Replace the `active_sessions` global dict with a dedicated `SessionStore` abstraction that composes the existing persistent store and in-memory cache. Expose a strategy interface so the forthcoming “team of agents” feature can register multiple agents per session (e.g., `PrimaryCoach`, `FeedbackCoach`, `GeneralChatCoach`).
-   - Model a reusable `AgentTeam` concept that aggregates multiple agent instances behind a single facade. Each team exposes lifecycle hooks (`boot`, `delegate`, `summarize`) so the API layer never talks to raw agents.
-   - Add a lightweight `AgentFactory` that accepts configuration (model, persona, parameters) and returns initialized agents. `start_agent` becomes a service function that registers whichever agents the feature flag requires.
-   - Define configuration-driven personas (e.g., YAML or Pydantic settings) so product teams can roll out additional agents by adding parameter bundles instead of code changes.
+**Primary objectives**
 
-4. **Schemas & DTOs**
-   - Move all request/response models into `app/schemas/*.py`. Group by concern (e.g., `session.py`, `voice.py`). This keeps the routers concise and centralizes validation logic.
-   - Provide explicit models for session state slices (e.g., `SessionSummary`, `VoiceTranscript`) so downstream tests can assert structure without brittle dict-key checks.
+1. Decouple HTTP concerns from domain logic so additional features (general chat, future agent teams) can ship independently.
+2. Provide explicit data contracts and persistence boundaries for session state to prevent cross-feature regressions.
+3. Introduce an extensible agent-team orchestration layer that can register multiple personas per session and surface configuration-driven parameters.
+4. Preserve existing interview flows while enabling an opt-in Veneo general chat experience behind feature gates.
 
-5. **Configuration**
-   - Introduce `app/settings.py` or extend `app/config.py` with structured Pydantic settings classes (e.g., `RealtimeSettings`, `AgentSettings`). Dependency injection via FastAPI’s `Depends` can supply the configuration to routers/services, simplifying overrides for new environments.
-   - Capture the general chat defaults in a `GeneralChatSettings` object (model id, tone, allowed tools) so the new agent team can opt-in without mutating interview-specific values.
-   - Externalize runtime-tunable parameters (temperature, max tokens, concurrency) for each agent persona to support experimentation.
+## 2. Observed pain points (code review summary)
 
-6. **Observability**
-   - Instrument the new service layer with structured logs/metrics (agent decision traces, queue times) to validate multi-agent coordination.
-   - Emit tracing spans around agent-team delegation to pinpoint latency regressions when general chat launches.
+| Area | Issue | Impact on new agent team |
+| --- | --- | --- |
+| Routing (`app/main.py`) | All endpoints (upload, questions, evaluation, voice, realtime) live in one module, interleaving FastAPI routing with business logic and cross-cutting concerns.【F:app/main.py†L1-L571】【F:app/main.py†L572-L1023】 | Hard to isolate changes for Veneo chat without risking regressions in interview flows. |
+| Session state | Global `active_sessions` dict and helper functions mutate nested dicts in place.【F:app/main.py†L74-L388】 | No schema enforcement; adding a general chat session risks type mismatches and race conditions. |
+| Agent orchestration | The `InterviewPracticeAgent` is instantiated and invoked inside route handlers with hard-coded model/temperature parameters.【F:app/main.py†L336-L856】 | Cannot register multiple agents or swap parameter bundles per customer. |
+| Realtime/voice setup | Realtime connection payloads and voice catalog helpers are baked into the route logic.【F:app/main.py†L856-L1023】 | Reuse for general chat would require duplicating code or branching logic inline. |
 
-7. **Extensibility for additional teams**
-   - Ensure routers/services accept an injected `AgentTeamResolver` that selects the right team based on feature flags, session metadata, or tenant configuration.
-   - Provide clear extension points for future teams (e.g., skill-assessment, onboarding) so new personas can ship without touching existing flows.
+## 3. Target compartmentalized architecture
 
-## Testing strategy
-1. **Unit tests**
-   - Add tests for the new service modules (`tests/services/test_session_service.py`, `test_voice_service.py`) that validate business rules such as transcript aggregation, session naming, and fallback scoring.
-   - Use dependency injection to pass fake agents into `qa_service` tests to cover both agent and fallback paths without live API calls.
-   - Mock the HTTP client in `realtime_client` tests to validate payload composition, ensuring the new agent parameters are forwarded correctly.
+### 3.1 API boundary
 
-2. **Integration tests**
-   - With routers split, write FastAPI `TestClient` tests per router module (e.g., `tests/api/test_voice_routes.py`) asserting HTTP status codes, validation errors, and session state mutations.
-   - Introduce fixtures for `SessionStore` that start with seeded session data to test rename/delete flows and verify persistence hooks.
-   - Add general-chat scenarios that assert the correct agent team is selected and that team-specific parameters (model, style guides) propagate to downstream services.
+* Create `app/api/` package with routers grouped by concern: `sessions.py`, `questions.py`, `evaluations.py`, `voice.py`, and `chat.py` (new for Veneo general chat).
+* Slim down `app/main.py` to FastAPI initialization, dependency wiring, and router inclusion. This file should not hold business rules.
+* Each router should delegate to service-layer functions and operate solely on typed request/response models.
 
-3. **End-to-end contract**
-   - Keep a small set of smoke tests hitting the high-level flows (`upload -> generate -> evaluate`). These should mock outbound HTTP calls but run against the assembled FastAPI app to ensure routers and middleware wiring remain intact.
-   - Add a general-chat smoke test covering `start chat -> exchange messages -> summarize` to detect regressions in the agent-team orchestration.
+### 3.2 Service layer
 
-## Incremental adoption plan
-1. Extract session helper functions into `app/services/session_service.py` and refactor a single router (e.g., `/sessions` endpoints) to use it. Add unit tests for the new service.
-2. Move the question/evaluation endpoints into `app/api/questions.py` + `qa_service`. Introduce agent factory abstraction and tests for fallback scoring logic.
-3. Carve out voice-specific routes and helpers into `voice.py` + `voice_service` and `realtime_client`. Backfill catalog/preview tests using local fixtures.
-4. Once services are covered, slim down `app/main.py` to FastAPI initialization, router registration, and the `if __name__ == "__main__"` block.
-5. Introduce new general-chat feature module that composes the shared services and registers additional agent teams by supplying different agent factory parameters.
-6. Ship the general-chat configuration behind a feature flag, validate telemetry, and then document how partner teams can add new agent personas via configuration plus targeted service tests.
+* **SessionService (`app/services/session_service.py`)**: encapsulate CRUD operations on session state; expose methods like `create_session`, `get_session`, `update_transcript`. Internally depend on a `SessionStore` abstraction.
+* **QAService (`app/services/qa_service.py`)**: orchestrate question generation, evaluation, and fallback heuristics. Accept injected agents via an `AgentTeam` facade so both interview and general chat flows can share infrastructure while swapping personas/parameters.
+* **ChatService (`app/services/chat_service.py`)**: handle Veneo-specific conversation flows, applying their parameter bundle, conversation memory rules, and guardrails.
+* **VoiceService & RealtimeClient**: extract voice catalog lookup, preview synthesis, and realtime session bootstrapping into reusable modules to prevent duplication between interview and general chat experiences.
 
-This staged approach keeps the app deployable while enabling the upcoming agent-team functionality and richer configuration without rewriting everything at once.
+### 3.3 Agent team orchestration
+
+* Model an `AgentTeam` interface exposing lifecycle hooks (`boot`, `delegate`, `summarize`). Each feature registers its team composition (e.g., Veneo general chat might use `PrimaryResponder` + `SafetyReviewer`).
+* Implement an `AgentFactory` that accepts persona definitions (model, parameters, prompt templates, safety settings) and returns configured agent instances. Factor out repeated configuration to support future teams without modifying routes.
+* Introduce an `AgentTeamResolver` responsible for selecting the appropriate team per session based on feature flags, tenant metadata, or request payloads.
+* Ensure the resolver is injected into services/routers via FastAPI dependencies to keep the API layer declarative.
+
+### 3.4 Data contracts and persistence
+
+* Define Pydantic models under `app/schemas/` for session state slices (e.g., `SessionSummary`, `TranscriptEntry`, `AgentRunConfig`).
+* Replace dictionary mutation with typed updates to guarantee compatibility when multiple features read/write the same session record.
+* Consider persisting session data via an interface (in-memory + optional durable backend) to support parallel development of new agent teams without reworking storage.
+
+### 3.5 Configuration management
+
+* Create `app/settings.py` (Pydantic `BaseSettings`) containing structured configuration classes: `AgentSettings`, `RealtimeSettings`, `VoiceSettings`, and feature-specific `GeneralChatSettings` for Veneo.
+* Store persona/parameter bundles in configuration (YAML or JSON) to enable non-engineering teams to adjust prompts, temperatures, and tool permissions.
+* Use FastAPI dependency injection to fetch settings per request, enabling environment overrides and A/B experiments.
+
+### 3.6 Observability and compliance
+
+* Instrument the new services with structured logging around agent delegation, latency, and error handling so that introducing additional teams remains debuggable.
+* Emit metrics/traces for team selection decisions to verify that Veneo tenants route to the general chat persona while others stay on the interview coach.
+* Centralize audit logging (message content, agent responses, safety filters) to satisfy enterprise compliance requirements when multiple agent teams coexist.
+
+## 4. Implementation roadmap
+
+1. **Lay the foundation**
+   * Add `app/api/`, `app/services/`, `app/schemas/`, and `app/settings.py` modules.
+   * Introduce `SessionStore` abstraction with unit tests to cover basic CRUD plus concurrency edge cases.
+
+2. **Extract session and QA flows**
+   * Move existing session and question/evaluation logic into `SessionService` and `QAService` respectively.
+   * Update existing routes to use the services while keeping their public API unchanged; add targeted tests.
+
+3. **Introduce agent-team infrastructure**
+   * Implement `AgentFactory`, `AgentTeam`, and `AgentTeamResolver`.
+   * Wrap current `InterviewPracticeAgent` usage into an interview-specific team for backwards compatibility.
+
+4. **Enable Veneo general chat**
+   * Create `ChatService` and `app/api/chat.py` router exposing the general chat endpoints.
+   * Define Veneo configuration bundle and register it with the resolver behind a feature flag.
+   * Verify routing/tests ensure only opted-in sessions receive the new team.
+
+5. **Refine realtime & voice modules**
+   * Extract voice/realtime helpers into dedicated services.
+   * Update both interview and general chat flows to consume the shared implementations.
+
+6. **Hardening & rollout**
+   * Expand test coverage (unit + integration + smoke tests) for both agent teams.
+   * Instrument telemetry dashboards; conduct load testing to ensure the resolver/agent factory scale.
+   * Document extension points for additional teams and finalize migration guide.
+
+## 5. Testing strategy
+
+* **Unit tests**: cover service classes, resolver logic, and agent factory configuration parsing. Use fakes/mocks for agents to avoid live API calls.
+* **Integration tests**: FastAPI `TestClient` suites per router validating HTTP contracts, feature flag behaviour, and session persistence.
+* **Contract/smoke tests**: orchestrate end-to-end flows (upload → generate → evaluate, start general chat → exchange messages → summarize) with mocked outbound calls to ensure the assembled app behaves correctly.
+
+## 6. Risks and mitigations
+
+| Risk | Mitigation |
+| --- | --- |
+| Refactor touches many files simultaneously | Ship in the staged roadmap above with feature-flagged Veneo chat; keep tests green at each step. |
+| Configuration drift between agent teams | Centralize persona definitions in configuration files validated by CI (schema linting). |
+| Session schema incompatibilities | Use versioned Pydantic models and migration helpers when storing sessions. |
+| Performance regressions with multi-agent orchestration | Add tracing and load tests to monitor latency; allow teams to toggle agents per feature until tuning is complete. |
+
+## 7. Definition of done
+
+* `app/main.py` reduced to bootstrapper with <200 lines and no embedded business logic.
+* All routes reside under `app/api/` and rely on typed schemas and service abstractions.
+* `SessionStore`, `AgentFactory`, and `AgentTeamResolver` support both interview and Veneo general chat flows, with tests demonstrating persona selection and parameter propagation.
+* Configuration-driven persona bundles documented and validated in CI.
+* Observability dashboards updated to reflect multi-agent metrics.
+
+Executing this plan will compartmentalize the application, enabling Veneo's general chat team—and future agent teams—to plug into a consistent architecture without destabilizing existing interview functionality.
