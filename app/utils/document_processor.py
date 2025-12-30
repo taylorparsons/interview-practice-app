@@ -1,7 +1,7 @@
 import os
 import uuid
 import docx
-import PyPDF2
+from pypdf import PdfReader
 from pathlib import Path
 from typing import Dict, Any, Tuple
 import io
@@ -39,7 +39,7 @@ def extract_text_from_pdf(file_path: str) -> str:
     text = ""
     try:
         with open(file_path, 'rb') as file:
-            pdf_reader = PyPDF2.PdfReader(file)
+            pdf_reader = PdfReader(file)
             for page_num in range(len(pdf_reader.pages)):
                 text += pdf_reader.pages[page_num].extract_text() + "\n"
     except Exception as e:
