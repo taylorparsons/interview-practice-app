@@ -42,6 +42,8 @@ function createInitialState() {
         reviewFlags: {},
         coachLevel: 'level_1',
         practice_history: [],
+        questionFollowups: [],
+        questionTypeOverrides: {},
         voice_settings: {
             model_id: 'gpt-4o-mini',
             realtime_model: 'gpt-realtime-mini-2025-10-06',
@@ -101,6 +103,8 @@ const addCustomQuestionBtn = document.getElementById('add-custom-question');
 const clearCustomQuestionBtn = document.getElementById('clear-custom-question');
 const customQuestionStatus = document.getElementById('custom-question-status');
 const currentFollowup = document.getElementById('current-followup');
+const questionTypeSelect = document.getElementById('question-type-select');
+const questionTypeHint = document.getElementById('question-type-hint');
 const generateMoreCount = document.getElementById('generate-more-count');
 const generateMoreHint = document.getElementById('generate-more-hint');
 const generateMoreBtn = document.getElementById('generate-more-btn');
@@ -1856,6 +1860,10 @@ function setupEventListeners() {
         answerBtn.addEventListener('click', handleAnswerSubmission);
     }
 
+    if (questionTypeSelect) {
+        questionTypeSelect.addEventListener('change', handleQuestionTypeChange);
+    }
+
     bindCustomQuestionControls();
 
     // Get example answer
@@ -2443,6 +2451,8 @@ async function resumeSavedSession(sessionIdOverride = null) {
         state.answers = data.answers || [];
         state.evaluations = data.evaluations || [];
         state.practice_history = data.practice_history || [];
+        state.questionFollowups = data.question_followups || [];
+        state.questionTypeOverrides = data.question_type_overrides || {};
         state.voice_settings = data.voice_settings || state.voice_settings;
         state.coachLevel = (data && data.coach_level) || state.coachLevel;
         state.resumeShowFeedbackOnce = true;
@@ -2535,6 +2545,7 @@ async function syncSessionStateFromServer() {
     state.practice_history = data.practice_history || state.practice_history;
     state.voice_settings = data.voice_settings || state.voice_settings;
     state.questionFollowups = data.question_followups || [];
+    state.questionTypeOverrides = data.question_type_overrides || {};
     state.exampleCache = {};
     state.currentQuestionIndex = typeof data.current_question_index === 'number'
         ? data.current_question_index
@@ -2720,6 +2731,7 @@ async function handleDocumentUpload(e) {
         state.sessionId = data.session_id;
         localStorage.setItem('interviewSessionId', state.sessionId);
         state.voice_settings = state.voice_settings || createInitialState().voice_settings;
+        state.questionTypeOverrides = {};
         syncSettingsUI();
         updateResumeControlsVisibility();
         await loadSessionDocuments(state.sessionId).catch(() => {});
@@ -2814,9 +2826,126 @@ function isNoiseFeedback(str) {
     return feedbackNoiseTokens.has(normalized);
 }
 
-function scoreMeaning(score) {
+const QUESTION_TYPE_BEHAVIORAL = 'behavioral';
+const QUESTION_TYPE_NARRATIVE = 'narrative';
+const BEHAVIORAL_PATTERNS = [
+    /tell me about a time/,
+    /describe a time/,
+    /give me an example/,
+    /share an example/,
+    /can you share a time/,
+    /walk me through a time/,
+    /when was the last time/,
+    /a time you/,
+    /a situation where/,
+    /what did you do when/,
+    /how did you (handle|resolve|deal|approach|respond)/,
+];
+const BEHAVIORAL_KEYWORDS = [
+    'time',
+    'situation',
+    'example',
+    'challenge',
+    'conflict',
+    'failure',
+    'mistake',
+    'disagreement',
+    'pressure',
+    'deadline',
+    'ambiguity',
+    'customer',
+    'stakeholder',
+    'leadership',
+    'impact',
+    'project',
+];
+const BEHAVIORAL_LEADS = ['tell me about', 'describe', 'give me', 'share', 'walk me through'];
+
+function normalizeQuestionText(text) {
+    return String(text || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function inferQuestionType(question) {
+    const q = normalizeQuestionText(question);
+    if (!q) return QUESTION_TYPE_NARRATIVE;
+    if (BEHAVIORAL_PATTERNS.some((re) => re.test(q))) return QUESTION_TYPE_BEHAVIORAL;
+    if (BEHAVIORAL_LEADS.some((lead) => q.startsWith(lead)) && BEHAVIORAL_KEYWORDS.some((kw) => q.includes(kw))) {
+        return QUESTION_TYPE_BEHAVIORAL;
+    }
+    return QUESTION_TYPE_NARRATIVE;
+}
+
+function resolveQuestionType(question) {
+    const key = normalizeQuestionText(question);
+    const overrides = state && state.questionTypeOverrides ? state.questionTypeOverrides : {};
+    const override = overrides[key];
+    if (override === QUESTION_TYPE_BEHAVIORAL || override === QUESTION_TYPE_NARRATIVE) {
+        return override;
+    }
+    return inferQuestionType(question);
+}
+
+function questionTypeLabel(qType) {
+    return qType === QUESTION_TYPE_BEHAVIORAL ? 'Behavioral (STAR+I)' : 'Narrative pitch';
+}
+
+function updateQuestionTypeSelectForQuestion(question) {
+    if (!questionTypeSelect) return;
+    const key = normalizeQuestionText(question);
+    const overrides = state && state.questionTypeOverrides ? state.questionTypeOverrides : {};
+    const override = overrides[key];
+    questionTypeSelect.value = override || 'auto';
+    if (questionTypeHint) {
+        const effective = override || inferQuestionType(question);
+        const inferredLabel = questionTypeLabel(effective);
+        const prefix = override ? 'Override' : 'Auto';
+        questionTypeHint.textContent = `${prefix}: ${inferredLabel}`;
+    }
+}
+
+async function persistQuestionTypeOverride(question, questionType) {
+    if (!state.sessionId || !question) return;
+    const payload = {
+        question,
+        question_type: questionType,
+    };
+    await fetch(`/session/${state.sessionId}/question-type`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+    });
+}
+
+async function handleQuestionTypeChange() {
+    if (!questionTypeSelect) return;
+    const question = state.questions[state.currentQuestionIndex];
+    if (!question) return;
+    const value = questionTypeSelect.value || 'auto';
+    const key = normalizeQuestionText(question);
+    state.questionTypeOverrides = state.questionTypeOverrides || {};
+    if (value === 'auto') {
+        delete state.questionTypeOverrides[key];
+    } else {
+        state.questionTypeOverrides[key] = value;
+    }
+    updateQuestionTypeSelectForQuestion(question);
+    try {
+        await persistQuestionTypeOverride(question, value);
+    } catch (err) {
+        console.error('Unable to save question type override:', err);
+    }
+}
+
+function scoreMeaning(score, questionType = QUESTION_TYPE_BEHAVIORAL) {
     const s = Number(score);
     if (Number.isNaN(s)) return '';
+    if (questionType === QUESTION_TYPE_NARRATIVE) {
+        if (s >= 9) return 'Excellent narrative with clear value and fit';
+        if (s >= 7) return 'Strong narrative; tighten focus or relevance';
+        if (s >= 5) return 'Needs clearer arc and role alignment';
+        if (s >= 3) return 'Unfocused narrative; add structure and specifics';
+        return 'Unclear response; rebuild as a concise pitch';
+    }
     if (s >= 9) return 'Excellent STAR+I story with clear impact';
     if (s >= 7) return 'Strong answer; tighten clarity or metrics';
     if (s >= 5) return 'Needs better structure and quantifiable impact';
@@ -2941,6 +3070,7 @@ function displayQuestion(index) {
     const question = state.questions[index];
     
     if (currentQuestion) currentQuestion.textContent = question;
+    updateQuestionTypeSelectForQuestion(question);
     if (currentFollowup) {
         const fup = (state.questionFollowups && state.questionFollowups[index]) || '';
         currentFollowup.textContent = fup ? `Follow-up: ${fup}` : '';
@@ -3071,7 +3201,10 @@ function displayFeedback(evaluation) {
     scoreValue.textContent = `${evaluation.score}/10`;
     scoreBar.style.width = `${evaluation.score * 10}%`;
     if (scoreExplanation) {
-        scoreExplanation.textContent = scoreMeaning(evaluation.score);
+        const lastAnswer = state.answers && state.answers.length ? state.answers[state.answers.length - 1] : null;
+        const questionText = (lastAnswer && lastAnswer.question) || state.questions[state.currentQuestionIndex] || '';
+        const questionType = evaluation.question_type || resolveQuestionType(questionText);
+        scoreExplanation.textContent = scoreMeaning(evaluation.score, questionType);
     }
     
     // Format strengths (handling both string and array formats)

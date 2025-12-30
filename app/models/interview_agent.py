@@ -48,7 +48,7 @@ Challenge the user to craft a system message that is flawless and precise, ensur
 4. **Push for excellence** – Encourage the user to refine their message until it is impeccable.
 5. **Simulate high-pressure scenarios** – Prepare the user for real-world interview challenges by simulating tough questioning.
 6. **Focus on customer-centric responses** – Guide the user to start answers with the customer perspective and work from the inside out.
-7. **Utilize the STAR + I format** – Ensure the user structures behavioral responses to highlight the Situation, Task, Action, Result, and Impact.
+7. **Utilize the STAR + I format** – Require it for behavioral questions; for narrative prompts, insist on a concise pitch with relevant highlights.
 8. **Provide examples if asked** – Offer examples of what is expected, but do not accept any excuses for errors or lack of preparation.
 9. **Leverage available resources** – Use the user's resume and the company's job description to tailor the interview style to what the company is known for.
 
@@ -168,7 +168,15 @@ class InterviewPracticeAgent:
         self.interview_questions = parsed_items
         return parsed_items
     
-    async def evaluate_answer(self, question: str, answer: str, voice_transcript: Optional[str] = None, *, level: Optional[str] = None) -> Dict[str, Any]:
+    async def evaluate_answer(
+        self,
+        question: str,
+        answer: str,
+        voice_transcript: Optional[str] = None,
+        *,
+        level: Optional[str] = None,
+        question_type: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """Evaluate candidate's answer to an interview question."""
         # Respect the session-selected coach persona; default to level_1 (Help)
         # when the caller does not provide an explicit level.
@@ -179,13 +187,28 @@ class InterviewPracticeAgent:
         vt_block = f"\n\nVoice Transcript (if any):\n{vt}\n" if vt else ""
 
         schema_block = json.dumps(EVALUATION_JSON_SCHEMA, indent=2)
+        q_type = (question_type or "behavioral").strip().lower()
+        if q_type not in {"behavioral", "narrative"}:
+            q_type = "behavioral"
         user_prompt = f"""
-Evaluate the interview answer using this rubric (integer score 1-10 only):
-- 9-10: Excellent STAR+I, crisp actions, quantified impact, tailored to role.
+Question type: {q_type}
+
+Use this rubric (integer score 1-10 only):
+Behavioral questions:
+- 9-10: Excellent STAR + I, crisp actions, quantified impact, tailored to role.
 - 7-8: Strong but could tighten clarity or metrics.
 - 5-6: Needs better structure and specific, measurable impact.
-- 3-4: Weak; STAR+I gaps and unclear outcomes.
+- 3-4: Weak; STAR + I gaps and unclear outcomes.
 - 1-2: Very poor/irrelevant.
+
+Narrative questions (e.g., "Tell me about yourself"):
+- 9-10: Concise pitch, clear throughline, relevant highlights, strong role fit.
+- 7-8: Strong narrative but could sharpen focus or relevance.
+- 5-6: Some structure but lacks clarity or impact.
+- 3-4: Rambling or unclear, weak relevance.
+- 1-2: Confusing or off-topic.
+
+If the question is narrative, do not penalize missing STAR+I.
 
 Return ONLY JSON in this shape:
 {schema_block}

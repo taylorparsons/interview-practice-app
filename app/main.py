@@ -40,6 +40,12 @@ from app.utils.session_store import (
 from app.utils.markdown import render_markdown_safe
 from app.utils.practice_history import record_completed_run
 from app.utils.pdf import render_pdf_from_html
+from app.utils.question_type import (
+    normalize_question_text,
+    resolve_question_type,
+    QUESTION_TYPE_BEHAVIORAL,
+    QUESTION_TYPE_NARRATIVE,
+)
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -113,6 +119,8 @@ def _ensure_session_defaults(session: Dict[str, Any]) -> Dict[str, Any]:
         session["pdf_exports"] = []
     if "practice_history" not in session or session["practice_history"] is None:
         session["practice_history"] = []
+    if "question_type_overrides" not in session or session["question_type_overrides"] is None:
+        session["question_type_overrides"] = {}
     # Default the coaching persona to the easier (supportive) mode when
     # missing. This value is persisted per-session and can be changed by the UI
     # via PATCH /session/{id}/coach-level.
@@ -433,6 +441,11 @@ class SetCoachLevelRequest(BaseModel):
     level: str
 
 
+class SetQuestionTypeRequest(BaseModel):
+    question: str
+    question_type: Optional[str] = None
+
+
 class InvalidEvaluationError(Exception):
     """Raised when a model-produced evaluation payload fails validation."""
 
@@ -528,6 +541,7 @@ async def upload_documents(
         "summary": {},
         # Store the UI-selectable coach level; default to level_1 (Help).
         "coach_level": "level_1",
+        "question_type_overrides": {},
     }
 
     _persist_session_state(session_id, session_data)
@@ -722,23 +736,29 @@ async def evaluate_answer(request: EvaluateAnswerRequest):
             if not transcript_text:
                 transcripts = session.get("voice_transcripts", {})
                 transcript_text = transcripts.get(str(idx)) or transcripts.get(idx) or ""
+            question_type = resolve_question_type(
+                request.question, session.get("question_type_overrides")
+            )
 
             logger.info(
-                "evaluation.agent path: session=%s attempt=%s idx=%s q_len=%s a_len=%s t_present=%s",
+                "evaluation.agent path: session=%s attempt=%s idx=%s q_len=%s a_len=%s t_present=%s q_type=%s",
                 session_id,
                 attempt + 1,
                 idx,
                 len(request.question or ""),
                 len(request.answer or ""),
                 bool(transcript_text and transcript_text.strip()),
+                question_type,
             )
             evaluation_raw = await agent.evaluate_answer(
                 request.question,
                 request.answer,
                 transcript_text,
                 level=session.get("coach_level") or "level_2",
+                question_type=question_type,
             )
             evaluation = _validate_evaluation_payload(evaluation_raw)
+            evaluation["question_type"] = question_type
 
             if "answers" not in session:
                 session["answers"] = []
@@ -785,6 +805,9 @@ async def evaluate_answer(request: EvaluateAnswerRequest):
         len(request.question or ""),
         len(request.answer or ""),
     )
+    question_type = resolve_question_type(
+        request.question, session.get("question_type_overrides")
+    )
     answer_length = len(request.answer)
     
     score = 0
@@ -830,6 +853,26 @@ async def evaluate_answer(request: EvaluateAnswerRequest):
         ]
         improvements = [possible_improvements[answer_length % len(possible_improvements)]]
     
+    if question_type == QUESTION_TYPE_BEHAVIORAL:
+        why_asked = "Assesses STAR+I structure, clarity, and quantified impact."
+        feedback = (
+            "Your answer demonstrates some strengths. To improve, ensure you "
+            "directly address the question up front, then use STAR + I and "
+            "quantify outcomes where possible."
+        )
+        example_improvement = (
+            "Provide a concise STAR + I story with 1-2 concrete actions and measurable impact."
+        )
+    else:
+        why_asked = "Assesses clarity of your narrative pitch, role fit, and relevance."
+        feedback = (
+            "Your answer demonstrates some strengths. To improve, open with a crisp "
+            "summary, then highlight 2-3 relevant wins and why they map to this role."
+        )
+        example_improvement = (
+            "Lead with a one-line value proposition, then 2 concrete highlights and why this role fits."
+        )
+
     evaluation = {
         "score": score,
         "strengths": strengths,
@@ -843,9 +886,10 @@ async def evaluate_answer(request: EvaluateAnswerRequest):
             "clarity": 7,
             "professionalism": 8
         },
-        "why_asked": "Assesses clarity, relevance to the question, and ability to tailor responses to the role.",
-        "feedback": "Your answer demonstrates some strengths. To improve, ensure you directly address the question up front, then use a brief STAR structure and quantify outcomes where possible.",
-        "example_improvement": "Provide a concise, structured answer with 1-2 concrete examples and measurable results."
+        "why_asked": why_asked,
+        "feedback": feedback,
+        "example_improvement": example_improvement,
+        "question_type": question_type,
     }
     
     if "answers" not in session:
@@ -943,6 +987,7 @@ async def get_session_status(session_id: str):
         "summary": session.get("summary", {}),
         # Expose the current coach level to hydrate the UI selector.
         "coach_level": session.get("coach_level", "level_1"),
+        "question_type_overrides": session.get("question_type_overrides", {}),
     }
 
 
@@ -1020,6 +1065,11 @@ async def delete_questions(session_id: str, payload: DeleteQuestionsRequest):
         raise HTTPException(status_code=400, detail="no valid indices")
 
     removed_questions = {questions[i] for i in remove_set}
+    overrides = session.get("question_type_overrides") or {}
+    if overrides and removed_questions:
+        for q in removed_questions:
+            overrides.pop(normalize_question_text(q), None)
+        session["question_type_overrides"] = overrides
     def _shift_index(idx: int) -> Optional[int]:
         if idx in remove_set:
             return None
@@ -1246,7 +1296,13 @@ def _build_voice_instructions(session_id: str, session: Dict[str, Any]) -> str:
         first_question = "Tell me about yourself."
         ordered = [first_question]
 
-    question_bullets = "\n".join(f"- {q}" for q in ordered[:5]) or "- Ask situational and behavioral questions tailored to the role."
+    overrides = session.get("question_type_overrides") or {}
+    labeled_questions = []
+    for q in ordered[:5]:
+        q_type = resolve_question_type(q, overrides)
+        label = "Behavioral (STAR+I)" if q_type == QUESTION_TYPE_BEHAVIORAL else "Narrative pitch"
+        labeled_questions.append(f"- {q} [{label}]")
+    question_bullets = "\n".join(labeled_questions) or "- Ask situational and behavioral questions tailored to the role."
     resume_excerpt = _truncate_text(session.get("resume_text", ""), 1500)
     job_desc_excerpt = _truncate_text(session.get("job_desc_text", ""), 1500)
 
@@ -1269,6 +1325,9 @@ Interview question plan:
 
 # Realtime Guidance:
 Conduct a conversational mock interview. Start with a brief greeting, then ask the first question exactly as "{first_question}".
+Question format guidance:
+- Behavioral questions require STAR + I (Situation, Task, Action, Result, Impact).
+- Narrative questions (e.g., "Tell me about yourself") should be a concise pitch; do not force STAR + I.
 Listen to the candidate's voice response. Do not interrupt the candidate while they are speaking; wait for a clear pause or completion before replying. Keep spoken feedback concise (under 20 seconds) and constructive (under 4 sentences).
 Proceed through the remaining questions naturally. If the candidate asks for clarification or coaching, offer targeted guidance.
 Keep responses under 30 seconds and always send a short text summary alongside audio so the UI can display the feedback.
@@ -1293,6 +1352,29 @@ async def set_coach_level(session_id: str, payload: SetCoachLevelRequest):
     except Exception:
         pass
     return {"ok": True, "level": level}
+
+
+@app.patch("/session/{session_id}/question-type")
+async def set_question_type(session_id: str, payload: SetQuestionTypeRequest):
+    """Override the inferred question type (behavioral vs narrative)."""
+    session = _get_session(session_id)
+    question = (payload.question or "").strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="question is required")
+    q_type = (payload.question_type or "").strip().lower()
+    overrides = session.get("question_type_overrides") or {}
+    key = normalize_question_text(question)
+
+    if not q_type or q_type == "auto":
+        overrides.pop(key, None)
+    elif q_type in {QUESTION_TYPE_BEHAVIORAL, QUESTION_TYPE_NARRATIVE}:
+        overrides[key] = q_type
+    else:
+        raise HTTPException(status_code=400, detail="Invalid question_type")
+
+    session["question_type_overrides"] = overrides
+    _persist_session_state(session_id, session)
+    return {"ok": True, "question_type_overrides": overrides}
 
 
 @app.patch("/session/{session_id}/settings")

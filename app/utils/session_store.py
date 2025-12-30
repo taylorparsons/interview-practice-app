@@ -51,6 +51,8 @@ def load_session(session_id: str) -> Optional[Dict[str, Any]]:
         data["pdf_exports"] = []
     if "summary" not in data or data["summary"] is None:
         data["summary"] = {}
+    if "question_type_overrides" not in data or data["question_type_overrides"] is None:
+        data["question_type_overrides"] = {}
     return data
 
 

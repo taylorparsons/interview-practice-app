@@ -67,3 +67,6 @@ async def test_evaluation_prompt_includes_json_schema():
     content = user_msg.get("content") or ""
     schema_snippet = json.dumps(EVALUATION_JSON_SCHEMA, indent=2)
     assert schema_snippet in content
+    assert "Question type" in content
+    assert "STAR + I" in content
+    assert "behavioral" in content

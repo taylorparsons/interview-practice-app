@@ -26,6 +26,7 @@ def test_load_session_backfills_voice_fields(monkeypatch, tmp_path):
     assert loaded["voice_transcripts"] == {}
     assert loaded["voice_agent_text"] == {}
     assert loaded["voice_settings"]["voice_id"] == OPENAI_REALTIME_VOICE
+    assert loaded["question_type_overrides"] == {}
 
 
 @pytest.mark.parametrize(
@@ -53,3 +54,4 @@ def test_ensure_session_defaults_sets_voice_settings(voice_settings, expected_vo
     assert updated["voice_messages"] == []
     assert updated["voice_transcripts"] == {}
     assert updated["voice_agent_text"] == {}
+    assert updated["question_type_overrides"] == {}
