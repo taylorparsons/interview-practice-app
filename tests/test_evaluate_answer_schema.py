@@ -17,7 +17,9 @@ class _InvalidAgent:
     def __init__(self, counter):
         self.counter = counter
 
-    async def evaluate_answer(self, question, answer, transcript_text, level=None):
+    async def evaluate_answer(
+        self, question, answer, transcript_text, level=None, question_type=None
+    ):
         self.counter["count"] += 1
         # Return a malformed payload (missing required fields)
         return {"foo": "bar"}
