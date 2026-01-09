@@ -103,9 +103,9 @@ fi
 
 # 4) Ensure runtime folders and environment file
 mkdir -p logs logs/archive app/session_store app/static/voices
-if [[ ! -f .env && -f .env.example ]]; then
-  cp .env.example .env
-  echo "Created .env from .env.example (set OPENAI_API_KEY to enable voice)."
+if [[ ! -f .env && -f env.example ]]; then
+  cp env.example .env
+  echo "Created .env from env.example (set OPENAI_API_KEY to enable voice)."
 fi
 
 # 5) Action dispatch

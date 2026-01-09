@@ -1,0 +1,54 @@
+# Pre-commit Hook Configuration
+# Install: pip install pre-commit && pre-commit install
+# Run manually: pre-commit run --all-files
+#
+# See https://pre-commit.com for more information
+# See https://pre-commit.com/hooks.html for more hooks
+
+repos:
+  # General file checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-added-large-files
+        args: ['--maxkb=1000']
+      - id: check-case-conflict
+      - id: check-merge-conflict
+      - id: detect-private-key
+      - id: mixed-line-ending
+
+  # Local security checks
+  - repo: local
+    hooks:
+      - id: scan-secrets
+        name: Scan for secrets
+        entry: python scripts/scan_for_secrets.py --staged
+        language: python
+        stages: [commit]
+        pass_filenames: false
+
+      - id: check-absolute-paths
+        name: Check for absolute paths
+        entry: bash -c 'git diff --cached | grep -qE "/Users/|/home/" && echo "ERROR: Found absolute paths in staged files." && exit 1 || exit 0'
+        language: system
+        stages: [commit]
+        pass_filenames: false
+
+      - id: check-build-artifacts
+        name: Check for build artifacts
+        entry: bash -c 'git diff --cached --name-only | grep -qE "__pycache__|\.pyc$|\.DS_Store$" && echo "ERROR: Found build artifacts in staged files." && exit 1 || exit 0'
+        language: system
+        stages: [commit]
+        pass_filenames: false
+
+  # Commit message validation
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v3.0.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+        args: [feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert]

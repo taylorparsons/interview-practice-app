@@ -75,9 +75,9 @@ chmod +x run_voice.sh test.sh kill.sh
 ```
 
 2. Configure Environment Variables
-Copy `.env.example` to `.env`, then add your OpenAI API key:
+Copy `env.example` to `.env`, then add your OpenAI API key:
 ```bash
-cp .env.example .env
+cp env.example .env
 ```
 Update `.env` with your token (and override realtime model/voice if desired).
 
