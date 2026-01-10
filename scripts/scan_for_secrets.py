@@ -99,11 +99,14 @@ class SecretScanner:
         r"\.pyc$",
         r"\.egg-info/",
         r"__pycache__/",
+        r"\.venv/",
+        r"venv/",
         r"node_modules/",
         r"\.lock$",
         r"\.sum$",
         r"test[_s]/",
         r"\.md$",
+        r"scripts/scan_for_secrets\.py$",
     ]
 
     FALSE_POSITIVES = [
