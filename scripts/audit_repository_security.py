@@ -13,6 +13,7 @@ Based on research from:
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -90,18 +91,21 @@ class SecurityAuditor:
         """Scan for common secret patterns in git history."""
         print("Scanning for secrets in git history...")
 
-        # Common secret patterns (simplified)
+        # High-confidence secret patterns for history scanning.
         patterns = [
-            (r"api[_-]?key", "API keys"),
-            (r"secret[_-]?key", "Secret keys"),
-            (r"password\s*=", "Hardcoded passwords"),
-            (r"token\s*=", "Access tokens"),
-            (r"-----BEGIN.*PRIVATE KEY-----", "Private keys"),
+            (r"ghp_[a-zA-Z0-9]{36}", "GitHub Personal Access Tokens"),
+            (r"AKIA[0-9A-Z]{16}", "AWS Access Key IDs"),
+            (r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----", "Private keys"),
+            (r"sk_live_[0-9a-zA-Z]{24,}", "Stripe Secret Keys"),
+            (
+                r"xox[baprs]-[0-9]{10,12}-[0-9]{10,12}-[a-zA-Z0-9]{24,32}",
+                "Slack tokens",
+            ),
         ]
 
         try:
             for pattern, desc in patterns:
-                cmd = ["git", "log", "-S", pattern, "--all", "--oneline"]
+                cmd = ["git", "log", "-G", pattern, "--all", "--oneline"]
                 result = subprocess.run(
                     cmd, capture_output=True, text=True, cwd=self.repo_path
                 )
@@ -123,6 +127,11 @@ class SecurityAuditor:
         """Check for hardcoded absolute paths in tracked files."""
         print("Checking for absolute paths...")
 
+        allowlist = {
+            ".pre-commit-config.yaml",
+            "scripts/audit_repository_security.py",
+        }
+
         try:
             cmd = ["git", "ls-files"]
             result = subprocess.run(
@@ -140,6 +149,8 @@ class SecurityAuditor:
 
             for file in files:
                 if not file:
+                    continue
+                if file in allowlist:
                     continue
                 file_path = self.repo_path / file
                 if file_path.suffix in [".pyc", ".so", ".dll", ".exe"]:
@@ -214,12 +225,11 @@ class SecurityAuditor:
         print("Checking for sensitive file patterns...")
 
         sensitive_patterns = [
-            (".env", "Environment variables file"),
-            ("credentials", "Credentials file"),
-            ("secrets", "Secrets file"),
-            (".pem", "Private key file"),
-            (".key", "Key file"),
-            ("id_rsa", "SSH private key"),
+            (r"(^|/)\.env(\.|$)", "Environment variables file"),
+            (r"(^|/)(secrets?|credentials?)(\.|$)", "Secrets file"),
+            (r"\.pem$", "Private key file"),
+            (r"\.key$", "Key file"),
+            (r"(^|/)id_rsa$", "SSH private key"),
         ]
 
         try:
@@ -232,7 +242,7 @@ class SecurityAuditor:
 
             for file in tracked_files:
                 for pattern, desc in sensitive_patterns:
-                    if pattern in file.lower():
+                    if re.search(pattern, file.lower()):
                         self.add_finding(
                             "critical",
                             f"Sensitive file tracked: {file}",
