@@ -192,6 +192,12 @@ These map to the Realtime session `turn_detection` payload. Set values, restart 
   - Orders entries by timestamp when available; otherwise by question index and role (You → Coach → System), stable by original order.
   - Coalesces consecutive “You” lines and preserves the earliest timestamp.
 
+### Export PDF
+- The **Export PDF** action renders a study guide using WeasyPrint on the server.
+- Install system dependencies before running locally:
+  - macOS (Homebrew): `brew install cairo pango gdk-pixbuf libffi`
+  - Debian/Ubuntu: `sudo apt-get install libcairo2 libpango-1.0-0 libgdk-pixbuf2.0-0 libffi-dev`
+
 ## Technologies Used
 - FastAPI
 - OpenAI GPT
