@@ -133,31 +133,43 @@ jobs:
   python-security:
     name: Python Security Checks
     runs-on: ubuntu-latest
-    if: hashFiles('requirements.txt') != '' || hashFiles('pyproject.toml') != ''
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Detect Python project
+        id: detect-python
+        run: |
+          if [ -f requirements.txt ] || [ -f pyproject.toml ]; then
+            echo "has_python=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_python=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Set up Python
+        if: ${{ steps.detect-python.outputs.has_python == 'true' }}
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Install dependencies
+        if: ${{ steps.detect-python.outputs.has_python == 'true' }}
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install safety bandit
 
       - name: Run Safety check
+        if: ${{ steps.detect-python.outputs.has_python == 'true' }}
         run: safety check --json || true
 
       - name: Run Bandit security scan
+        if: ${{ steps.detect-python.outputs.has_python == 'true' }}
         run: bandit -r . -f json -o bandit-report.json || true
 
       - name: Upload Security Reports
-        if: always()
+        if: ${{ always() && steps.detect-python.outputs.has_python == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: python-security-reports
@@ -168,22 +180,32 @@ jobs:
   npm-audit:
     name: NPM Audit
     runs-on: ubuntu-latest
-    if: hashFiles('package.json') != ''
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Detect Node project
+        id: detect-node
+        run: |
+          if [ -f package.json ]; then
+            echo "has_node=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_node=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Set up Node.js
+        if: ${{ steps.detect-node.outputs.has_node == 'true' }}
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
       - name: Run npm audit
+        if: ${{ steps.detect-node.outputs.has_node == 'true' }}
         run: npm audit --json > npm-audit-report.json || true
 
       - name: Upload NPM Audit Report
-        if: always()
+        if: ${{ always() && steps.detect-node.outputs.has_node == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: npm-audit-report
