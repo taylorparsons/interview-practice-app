@@ -39,7 +39,12 @@ def extract_text_from_pdf(file_path: str) -> str:
     text = ""
     try:
         with open(file_path, 'rb') as file:
-            pdf_reader = PdfReader(file)
+            try:
+                pdf_reader = PdfReader(file, strict=True)
+            except Exception:
+                # Retry with non-strict mode for slightly malformed PDFs.
+                file.seek(0)
+                pdf_reader = PdfReader(file)
             for page_num in range(len(pdf_reader.pages)):
                 text += pdf_reader.pages[page_num].extract_text() + "\n"
     except Exception as e:
