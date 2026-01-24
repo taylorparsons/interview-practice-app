@@ -3,6 +3,7 @@
 ## Overview
 An AI-powered interview practice application that helps job seekers prepare for interviews by generating personalized questions, providing real-time feedback, and offering example answers.
 <img width="1256" height="562" alt="image" src="https://github.com/user-attachments/assets/cb113ba3-24b8-43dd-86db-2b01f6e00915" />
+<img width="1053" height="567" alt="image" src="https://github.com/user-attachments/assets/3ce65ba2-6195-4bee-8675-6ea7904658cb" />
 
 <img width="760" height="758" alt="image" src="https://github.com/user-attachments/assets/419afb3c-c89a-48a9-98b7-47288c8b610e" />
 
