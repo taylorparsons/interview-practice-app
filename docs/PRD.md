@@ -10,4 +10,4 @@
 - Required evidence: baseline test results, post-merge test results, installed `pypdf` version, and the local merge commit(s). (Sources: CR-20260602-1105, CR-20260602-1106; D-20260602-1107)
 
 ## Next / backlog
-- Complete local merge validation for PR `#17` and, if non-regressive, merge the validated branch onto local `main`. (Sources: CR-20260602-1105, CR-20260602-1106; D-20260602-1107)
+- Shipped locally on `main` via merge commit `a7625b7`: PR `#17` was merged, `requirements.txt` now allows patched `pypdf`, and ATHENA audit files were added for this validation run. Evidence: `requirements.txt`, `docs/progress.txt`, `docs/audit/git-history.md`. (Sources: CR-20260602-1105, CR-20260602-1106; D-20260602-1107)

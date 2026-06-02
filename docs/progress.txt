@@ -12,12 +12,12 @@ Goal: Merge PR #17 locally, validate the dependency change, and keep the merged 
 DONE
 - [2026-06-02 11:07] T-001: Bootstrap ATHENA files, derived git history, and traceability records for the adopted repo. (Skills: athena, executing-plans, using-git-worktrees)
 - [2026-06-02 11:19] T-002: Merge PR #17 into the validation branch, reinstall dependencies, and collect post-merge validation evidence. (Skills: athena, executing-plans, using-git-worktrees)
+- [2026-06-02 11:22] T-003: Merge the validated result onto local `main`. (Skills: athena, executing-plans, using-git-worktrees)
+- [2026-06-02 11:24] T-004: Reconcile progress, spec status, and merge evidence in ATHENA docs. (Skills: athena, executing-plans, using-git-worktrees)
 
 IN PROGRESS
-- T-003: Merge the validated result onto local `main`. (Skills: athena, executing-plans, using-git-worktrees)
 
 NEXT
-- T-004: Reconcile progress, spec status, and merge evidence in ATHENA docs.
 
 NOTES
 - Commands run: `pytest -q tests/test_document_processor_backend.py` -> `2 passed in 0.12s` on pre-merge baseline.
@@ -29,5 +29,9 @@ NOTES
 - Commands run: `/Volumes/T9/code/interview-practice-app/venv/bin/pip install -r requirements.txt` -> upgraded `pypdf` from `6.6.0` to `6.12.2`.
 - Commands run: `/Volumes/T9/code/interview-practice-app/venv/bin/pytest -q tests/test_document_processor_backend.py` -> `2 passed in 0.18s` after dependency upgrade.
 - Commands run: `/Volumes/T9/code/interview-practice-app/venv/bin/pytest -q` -> `1 failed, 90 passed in 2.39s` after dependency upgrade, matching the same pre-existing async-plugin baseline failure already seen in the repo-specific venv.
+- Commands run: `git merge --no-ff review-pr-17-local-merge -m "Merge validated PR #17 locally"` -> merged validated branch onto local `main` at `a7625b7`.
+- Commands run: `/Volumes/T9/code/interview-practice-app/venv/bin/pytest -q tests/test_document_processor_backend.py` -> `2 passed in 0.21s` on local `main` after merge.
+- Commands run: `/Volumes/T9/code/interview-practice-app/venv/bin/pytest -q` -> `1 failed, 90 passed in 2.78s` on local `main`, still only the pre-existing async-plugin failure in `tests/test_evaluation_prompt_schema.py`.
 - Decisions: Validation runs in an isolated worktree before touching local `main`.
-- Risks / open questions: The fetched PR also carries historical `README.md` additions along with the `requirements.txt` bump; keep the validated merge exact rather than rewriting the branch during this task.
+- Decisions: The fetched PR also carries historical `README.md` additions along with the `requirements.txt` bump; the local merge kept the fetched branch content intact rather than rewriting it during validation.
+- Risks / open questions: The repo-specific venv still lacks the async pytest plugin needed by `tests/test_evaluation_prompt_schema.py`; that failure predates this merge and remains follow-up work outside PR #17.

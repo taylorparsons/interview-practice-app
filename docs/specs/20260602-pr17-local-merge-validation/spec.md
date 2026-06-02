@@ -1,6 +1,6 @@
 # Feature Spec: 20260602-pr17-local-merge-validation
 
-Status: Active
+Status: Done
 Created: 2026-06-02 11:07
 Inputs: CR-20260602-1105, CR-20260602-1106
 Decisions: D-20260602-1107
