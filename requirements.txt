@@ -13,7 +13,7 @@ pypdf>=6.6.2
 
 # Bump to a wheel-backed version to avoid macOS OpenMP build issues
 scikit-learn==1.5.2
-nltk==3.9.2
+nltk==3.9.4
 python-docx==0.8.11
 
 # Testing
