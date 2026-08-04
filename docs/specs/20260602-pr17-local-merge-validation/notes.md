@@ -1,4 +1,6 @@
-Session: 2026-06-02 11:07
+# Session Notes: 20260602-pr17-local-merge-validation (append-only)
+
+## S-20260602-1107
 Agent: Codex CLI
 Model: GPT-5 Codex
 Skills: athena, executing-plans, using-git-worktrees

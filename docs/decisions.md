@@ -20,3 +20,12 @@ Acceptance / test:
 - Merge PR #17 there and reinstall dependencies.
 - Run focused and full pytest checks before and after the merge.
 - Merge the validated branch onto local `main` without pushing.
+
+## D-20260804-1352
+Date: 2026-08-04 13:52
+Inputs: CR-20260804-1352
+PRD: Security and dependency maintenance
+
+Decision: Resolve alerts through dependency remediation only; do not dismiss or suppress any advisory. Upgrade required dependencies to GitHub's patched floor and remove a vulnerable direct dependency only if repository-wide inspection confirms production and test code do not import it.
+Rationale: The request is to close the reported Dependabot issues, and dismissal would hide rather than remediate risk. GitHub currently reports three NLTK advisories without a patched release, so safe removal is the only dependency-level path that can close all NLTK alerts.
+Alternatives considered: Upgrade NLTK to 3.10.0, which GitHub says fixes only nine alerts; dismiss the remaining alerts, which does not remediate them; replace application behavior, which is unnecessary if NLTK is unused.

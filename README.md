@@ -209,7 +209,7 @@ These map to the Realtime session `turn_detection` payload. Set values, restart 
 - OpenAI GPT
 - Tailwind CSS
 - Showdown.js
-- Python libraries (PyPDF2, python-docx, scikit-learn, nltk)
+- Python libraries (PyPDF2, python-docx, scikit-learn)
 
 ## Contributing
 1. Fork the repository
