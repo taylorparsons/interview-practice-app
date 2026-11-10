@@ -1,0 +1,39 @@
+# Session Notes: 20260602-pr17-local-merge-validation (append-only)
+
+## S-20260602-1107
+Agent: Codex CLI
+Model: GPT-5 Codex
+Skills: athena, executing-plans, using-git-worktrees
+Feature: 20260602-pr17-local-merge-validation
+Input: CR-20260602-1106
+Decisions: D-20260602-1107
+Spec: docs/specs/20260602-pr17-local-merge-validation/spec.md
+Tasks: docs/specs/20260602-pr17-local-merge-validation/tasks.md
+Goal: Merge PR #17 locally, validate the dependency change, and keep the merged result on local main only if tests remain green.
+
+DONE
+- [2026-06-02 11:07] T-001: Bootstrap ATHENA files, derived git history, and traceability records for the adopted repo. (Skills: athena, executing-plans, using-git-worktrees)
+- [2026-06-02 11:19] T-002: Merge PR #17 into the validation branch, reinstall dependencies, and collect post-merge validation evidence. (Skills: athena, executing-plans, using-git-worktrees)
+- [2026-06-02 11:22] T-003: Merge the validated result onto local `main`. (Skills: athena, executing-plans, using-git-worktrees)
+- [2026-06-02 11:24] T-004: Reconcile progress, spec status, and merge evidence in ATHENA docs. (Skills: athena, executing-plans, using-git-worktrees)
+
+IN PROGRESS
+
+NEXT
+
+NOTES
+- Commands run: `pytest -q tests/test_document_processor_backend.py` -> `2 passed in 0.12s` on pre-merge baseline.
+- Commands run: `pytest -q` -> `91 passed in 3.00s` on pre-merge baseline.
+- Commands run: `git worktree add /private/tmp/interview-practice-app-pr17-validation -b review-pr-17-local-merge` -> created isolated validation branch/worktree.
+- Commands run: `python3 /Users/taylorparsons/.codex/skills/athena/scripts/bootstrap_git_audit.py --out docs/audit/git-history.md` -> wrote derived git history for adopted repo baseline.
+- Commands run: `git fetch origin pull/17/head:pr-17-head` -> fetched PR #17 head into local ref `pr-17-head`.
+- Commands run: `git merge --no-ff pr-17-head -m "Merge PR #17 locally for validation"` -> merged PR #17 into isolated validation branch.
+- Commands run: `/Volumes/T9/code/interview-practice-app/venv/bin/pip install -r requirements.txt` -> upgraded `pypdf` from `6.6.0` to `6.12.2`.
+- Commands run: `/Volumes/T9/code/interview-practice-app/venv/bin/pytest -q tests/test_document_processor_backend.py` -> `2 passed in 0.18s` after dependency upgrade.
+- Commands run: `/Volumes/T9/code/interview-practice-app/venv/bin/pytest -q` -> `1 failed, 90 passed in 2.39s` after dependency upgrade, matching the same pre-existing async-plugin baseline failure already seen in the repo-specific venv.
+- Commands run: `git merge --no-ff review-pr-17-local-merge -m "Merge validated PR #17 locally"` -> merged validated branch onto local `main` at `a7625b7`.
+- Commands run: `/Volumes/T9/code/interview-practice-app/venv/bin/pytest -q tests/test_document_processor_backend.py` -> `2 passed in 0.21s` on local `main` after merge.
+- Commands run: `/Volumes/T9/code/interview-practice-app/venv/bin/pytest -q` -> `1 failed, 90 passed in 2.78s` on local `main`, still only the pre-existing async-plugin failure in `tests/test_evaluation_prompt_schema.py`.
+- Decisions: Validation runs in an isolated worktree before touching local `main`.
+- Decisions: The fetched PR also carries historical `README.md` additions along with the `requirements.txt` bump; the local merge kept the fetched branch content intact rather than rewriting it during validation.
+- Risks / open questions: The repo-specific venv still lacks the async pytest plugin needed by `tests/test_evaluation_prompt_schema.py`; that failure predates this merge and remains follow-up work outside PR #17.
