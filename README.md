@@ -2,6 +2,12 @@
 
 ## Overview
 An AI-powered interview practice application that helps job seekers prepare for interviews by generating personalized questions, providing real-time feedback, and offering example answers.
+<img width="1256" height="562" alt="image" src="https://github.com/user-attachments/assets/cb113ba3-24b8-43dd-86db-2b01f6e00915" />
+<img width="1053" height="567" alt="image" src="https://github.com/user-attachments/assets/3ce65ba2-6195-4bee-8675-6ea7904658cb" />
+
+<img width="760" height="758" alt="image" src="https://github.com/user-attachments/assets/419afb3c-c89a-48a9-98b7-47288c8b610e" />
+
+
 
 ## Features
 - Resume upload plus job description file or text input
@@ -192,12 +198,18 @@ These map to the Realtime session `turn_detection` payload. Set values, restart 
   - Orders entries by timestamp when available; otherwise by question index and role (You → Coach → System), stable by original order.
   - Coalesces consecutive “You” lines and preserves the earliest timestamp.
 
+### Export PDF
+- The **Export PDF** action renders a study guide using WeasyPrint on the server.
+- Install system dependencies before running locally:
+  - macOS (Homebrew): `brew install cairo pango gdk-pixbuf libffi`
+  - Debian/Ubuntu: `sudo apt-get install libcairo2 libpango-1.0-0 libgdk-pixbuf2.0-0 libffi-dev`
+
 ## Technologies Used
 - FastAPI
 - OpenAI GPT
 - Tailwind CSS
 - Showdown.js
-- Python libraries (PyPDF2, python-docx, scikit-learn, nltk)
+- Python libraries (PyPDF2, python-docx, scikit-learn)
 
 ## Contributing
 1. Fork the repository

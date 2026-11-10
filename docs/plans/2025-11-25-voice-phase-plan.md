@@ -1,18 +1,19 @@
 # Voice Experience Enhancements Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Deliver end-to-end voice UX enhancements: dual-sided transcripts with preserved formatting, Practice Again + runtime model/voice controls, and PDF export.
 
 **Architecture:** FastAPI session API stores additive fields (`voice_messages`, `voice_settings`, `practice_history`, `pdf_exports`) backed by JSON session files; frontend vanilla JS renders combined timeline, selectors, and exports. Streaming/ASR stays on OpenAI Realtime; markdown sanitized on backend; PDF rendered server-side via WeasyPrint.
 
 **Tech Stack:** FastAPI, Python 3.11, Jinja2, python-markdown + bleach, WeasyPrint, vanilla JS/Tailwind, pytest/FastAPI TestClient.
 
+**Status:** Phases 1–3 are implemented in this repo. Remaining work is verification, documentation polish, and future backlog items.
+
 ---
 
 ## Phase 1 — Dual-sided transcripts + formatting
 
-### Task 1: Schema defaults and loading
+### Task 1: Schema defaults and loading (DONE)
+- Status: Implemented in `app/main.py` + `app/utils/session_store.py` with tests in `tests/test_session_defaults.py`.
 - Files:
   - Modify: `app/main.py`
   - Modify: `app/utils/session_store.py` (if present; otherwise add helper)
@@ -23,7 +24,8 @@
 - Step 4: Run `pytest tests/test_session_defaults.py -q` (expect PASS).
 - Step 5: `git add app/main.py app/utils/session_store.py tests/test_session_defaults.py && git commit -m "feat: add voice defaults for legacy sessions"`
 
-### Task 2: Realtime transcription + role packets
+### Task 2: Realtime transcription + role packets (DONE)
+- Status: Implemented with tests in `tests/test_voice_messages_api.py`.
 - Files:
   - Modify: `app/main.py` (realtime session creation + endpoints)
   - Modify: `app/models/interview_agent.py` (if needed for message plumbing)
@@ -34,7 +36,8 @@
 - Step 4: Run `pytest tests/test_voice_messages_api.py -q` (expect PASS).
 - Step 5: `git add app/main.py app/models/interview_agent.py tests/test_voice_messages_api.py && git commit -m "feat: store dual-sided voice messages with transcription"`
 
-### Task 3: Markdown preservation + sanitizer
+### Task 3: Markdown preservation + sanitizer (DONE)
+- Status: Implemented in `app/utils/markdown.py` with tests in `tests/test_markdown_sanitizer.py`.
 - Files:
   - Modify: `app/models/interview_agent.py`
   - Add: `app/utils/markdown.py` (sanitizer helper)
@@ -47,22 +50,24 @@
 - Step 5: Run `pytest tests/test_markdown_sanitizer.py -q` (expect PASS).
 - Step 6: `git add app/models/interview_agent.py app/utils/markdown.py requirements.txt tests/test_markdown_sanitizer.py && git commit -m "feat: preserve coach markdown with sanitization"`
 
-### Task 4: Frontend timeline + mic UX
+### Task 4: Frontend timeline + mic UX (DONE)
+- Status: Implemented in UI; automated UI coverage exists under `tests/test_ui_*`.
 - Files:
   - Modify: `app/static/js/app.js`
   - Modify: `app/templates/index.html` (timeline/mic UI)
-  - Test: `tests/test_frontend_placeholder.md` (manual checklist placeholder if no FE test harness)
+  - Test: `tests/test_ui_*` (existing UI regression tests; add more as needed)
 - Step 1: Update timeline renderer to show coach/user entries from persisted `voice_messages` within 150 ms; render sanitized HTML.
 - Step 2: Add mic activity states (idle/listening/speaking/muted/unsupported) and toggles for browser ASR fallback + metadata view.
 - Step 3: Add “Export Transcript” (JSON/txt) action.
-- Step 4: Smoke-test manually; document steps in `tests/test_frontend_placeholder.md`.
-- Step 5: `git add app/static/js/app.js app/templates/index.html tests/test_frontend_placeholder.md && git commit -m "feat: render dual-sided voice timeline with mic UX"`
+- Step 4: Smoke-test manually; update `tests/test_ui_*` coverage as needed.
+- Step 5: `git add app/static/js/app.js app/templates/index.html tests/test_ui_* && git commit -m "feat: render dual-sided voice timeline with mic UX"`
 
 ---
 
 ## Phase 2 — Practice Again + model/voice selectors
 
-### Task 5: Practice Again backend + schema
+### Task 5: Practice Again backend + schema (DONE)
+- Status: Implemented with tests in `tests/test_practice_again.py`.
 - Files:
   - Modify: `app/main.py`
   - Modify/Add: `app/utils/practice_history.py` (helper)
@@ -73,17 +78,19 @@
 - Step 4: Run `pytest tests/test_practice_again.py -q` (expect PASS).
 - Step 5: `git add app/main.py app/utils/practice_history.py tests/test_practice_again.py && git commit -m "feat: add practice again with run history"`
 
-### Task 6: Practice Again UI flow
+### Task 6: Practice Again UI flow (DONE)
+- Status: Implemented in UI; verify alongside `tests/test_practice_again.py` + `tests/test_ui_*`.
 - Files:
   - Modify: `app/static/js/app.js`
   - Modify: `app/templates/index.html`
-  - Test: extend `tests/test_frontend_placeholder.md` with manual steps
+  - Test: extend `tests/test_ui_*` coverage as needed
 - Step 1: Add modal/wizard to reuse existing questions or append new ones; call new endpoint.
 - Step 2: Refresh timeline/state after reset; surface first question of new run.
-- Step 3: Manual regression for text + voice sessions; update checklist doc.
-- Step 4: `git add app/static/js/app.js app/templates/index.html tests/test_frontend_placeholder.md && git commit -m "feat: practice again UI for voice/text sessions"`
+- Step 3: Manual regression for text + voice sessions; update `tests/test_ui_*` as needed.
+- Step 4: `git add app/static/js/app.js app/templates/index.html tests/test_ui_* && git commit -m "feat: practice again UI for voice/text sessions"`
 
-### Task 7: Model/effort/verbosity settings
+### Task 7: Model/effort/verbosity settings (DONE)
+- Status: Implemented with tests in `tests/test_session_settings.py`.
 - Files:
   - Modify: `app/main.py`
   - Modify: `app/models/interview_agent.py`
@@ -94,31 +101,33 @@
 - Step 3: Implement `voice_settings` fields (model_id, thinking_effort, verbosity) with defaults and validation; agent consumes on next call.
 - Step 4: UI drawer to select options; toast “applies to upcoming questions.”
 - Step 5: Run `pytest tests/test_session_settings.py -q` and manual UI check (document in frontend checklist).
-- Step 6: `git add app/main.py app/models/interview_agent.py app/static/js/app.js tests/test_session_settings.py tests/test_frontend_placeholder.md && git commit -m "feat: runtime model effort verbosity settings"`
+- Step 6: `git add app/main.py app/models/interview_agent.py app/static/js/app.js tests/test_session_settings.py tests/test_ui_* && git commit -m "feat: runtime model effort verbosity settings"`
 
-### Task 8: Voice selection + preview
+### Task 8: Voice selection + preview (DONE)
+- Status: Implemented in `app/main.py` + `app/voice_catalog.json` with tests in `tests/test_voice_catalog.py`.
 - Files:
-  - Add: `app/voice_catalog.json`
+  - Existing: `app/voice_catalog.json`
   - Modify: `app/main.py` (GET /voices, PATCH /session/{id}/voice, preview endpoint)
-  - Add: `app/static/voices/` (cached previews)
+  - Existing: `app/static/voices/` (cached previews)
   - Modify: `app/static/js/app.js`
   - Modify: `app/templates/index.html`
-  - Test: `tests/test_voice_catalog.py` (new)
+  - Test: `tests/test_voice_catalog.py`
 - Step 1: Write failing tests for catalog endpoint, preview generation/caching, and persistence to session.
 - Step 2: Run `pytest tests/test_voice_catalog.py -q` (expect FAIL).
 - Step 3: Implement catalog read, validation, preview synthesis (OpenAI TTS) with disk cache; handshake uses `voice_id`.
 - Step 4: UI dropdown + preview button with loading/disable behavior; save selection.
 - Step 5: Run tests and update frontend manual checklist.
-- Step 6: `git add app/voice_catalog.json app/main.py app/static/js/app.js app/templates/index.html tests/test_voice_catalog.py tests/test_frontend_placeholder.md && git commit -m "feat: voice selector with preview caching"`
+- Step 6: `git add app/voice_catalog.json app/main.py app/static/js/app.js app/templates/index.html tests/test_voice_catalog.py tests/test_ui_* && git commit -m "feat: voice selector with preview caching"`
 
 ---
 
 ## Phase 3 — PDF study guide export
 
-### Task 9: PDF export backend
+### Task 9: PDF export backend (DONE)
+- Status: Implemented with tests in `tests/test_pdf_export.py`.
 - Files:
   - Modify: `requirements.txt` (WeasyPrint and deps)
-  - Modify: `app/main.py` (POST /sessions/{id}/exports/pdf`)
+  - Modify: `app/main.py` (POST /sessions/{id}/exports/pdf)
   - Add: `app/templates/pdf/export.html` (Jinja2)
   - Add: `app/utils/pdf.py`
   - Test: `tests/test_pdf_export.py` (new)
@@ -128,17 +137,18 @@
 - Step 4: Run tests (allow slower timeout for PDF) and fix.
 - Step 5: `git add requirements.txt app/main.py app/templates/pdf/export.html app/utils/pdf.py tests/test_pdf_export.py && git commit -m "feat: pdf study guide export endpoint"`
 
-### Task 10: PDF export UI + docs
+### Task 10: PDF export UI + docs (DONE)
+- Status: Implemented in UI; README now documents WeasyPrint system dependencies.
 - Files:
   - Modify: `app/static/js/app.js`
   - Modify: `app/templates/index.html`
-  - Modify: `README.md` and `.env.example` (deps/env notes)
-  - Test: update `tests/test_frontend_placeholder.md`
+  - Modify: `README.md` and `env.example` (deps/env notes)
+  - Test: update `tests/test_ui_*` coverage as needed
 - Step 1: Add Export CTA with progress indicator; handle multiple exports; download on success.
 - Step 2: Document WeasyPrint/system deps in README and env vars (if any).
 - Step 3: Manual layout review; update checklist doc.
-- Step 4: `git add app/static/js/app.js app/templates/index.html README.md .env.example tests/test_frontend_placeholder.md && git commit -m "feat: pdf export UI and docs"`
-- Step 5: Extend settings UI to expose model/effort/verbosity controls (wired to `PATCH /session/{id}/settings`); persist selection and show “applies to upcoming questions” note.
+ - Step 4: `git add app/static/js/app.js app/templates/index.html README.md env.example tests/test_ui_* && git commit -m "feat: pdf export UI and docs"`
+ - Step 5: Duplicate of Task 7 (settings UI) — no additional work needed.
 
 ---
 
