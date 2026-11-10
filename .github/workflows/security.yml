@@ -170,7 +170,7 @@ jobs:
 
       - name: Upload Security Reports
         if: ${{ always() && steps.detect-python.outputs.has_python == 'true' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: python-security-reports
           path: |
@@ -206,7 +206,7 @@ jobs:
 
       - name: Upload NPM Audit Report
         if: ${{ always() && steps.detect-node.outputs.has_node == 'true' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: npm-audit-report
           path: npm-audit-report.json
