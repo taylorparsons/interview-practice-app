@@ -18,5 +18,5 @@ python-docx==0.8.11
 # Testing
 pytest>=7.4.0
 markdown>=3.6
-bleach>=6.1.0
+bleach>=6.4.0
 weasyprint>=62.0
